@@ -41,3 +41,7 @@ iPhone Safariでは、URLを開く → 共有 → 「ホーム画面に追加」
 ```bash
 npm test
 ```
+
+## 開発プロセス
+
+設計・実装・レビュー・公開検証の役割分担と証跡は、[実行・公開レポート](docs/superpowers/reports/2026-09-22-execution-and-release-report.md)にまとめています。
