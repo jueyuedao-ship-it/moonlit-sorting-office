@@ -2,11 +2,11 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** 規則帳を参照しながら18通の郵便票を3系統へ仕分ける、保存・再開可能なローカル完結ブラウザ作業ゲームを作る。
+**Goal:** 規則帳を参照しながら18通の郵便票を3系統へ仕分ける、端末保存・再開・オフライン起動可能なPWA作業ゲームを作る。
 
-**Architecture:** DOMや保存に依存しない不変ゲーム状態機械を中心に置き、version付きlocalStorageアダプターと薄いDOMアプリを接続する。UIはビルド不要のHTML/CSS/ES Modulesで提供し、ドメインと保存はNode標準テストで検証する。
+**Architecture:** DOMや保存に依存しない不変ゲーム状態機械を中心に置き、version付きlocalStorageアダプターと薄いDOMアプリを接続する。UIはビルド不要のHTML/CSS/ES Modulesで提供し、相対パスmanifestとversion付きService Worker app shellを重ねる。ドメイン・保存・表示モデル・PWA workerイベントはNode標準テストで検証する。
 
-**Tech Stack:** HTML5, CSS3, JavaScript ES Modules, Node.js 20+ built-in `node:test`, localStorage
+**Tech Stack:** HTML5, CSS3, JavaScript ES Modules, Web App Manifest, Service Worker, Node.js 20+ built-in `node:test`, localStorage, GitHub Pages
 
 **Spec:** `docs/superpowers/specs/2026-09-22-moonlit-sorting-office-design.md`
 
@@ -18,6 +18,10 @@
 - 判定優先順位は「赤印→特急便」「それ以外で現在の要確認地区または重量→確認台」「それ以外→通常便」。
 - `1` / `2` / `3` とクリックの両方で完遂でき、主要ボタンは最低44px、320px幅で横スクロールを出さない。
 - 保存キーは `moonlit-sorting-office:v1`、保存形式versionは `1`。進行中・結果・最高得点・累計勤務数を再読込後に復元する。
+- GitHub Pagesサブパス対応のためアプリ資産・manifest・Service Worker登録はすべて `./` 基準の相対パスにする。
+- manifestは `start_url: "./"`, `scope: "./"`, `display: "standalone"`、192px/512px PNGアイコンを含める。Apple向けに180px PNGとmobile-web-app metaを含める。
+- Service Workerは同一origin GETだけをnetwork-firstで扱い、version付きapp shellへoffline fallbackし、このアプリprefixの旧キャッシュだけをactivate時に削除する。
+- ソース/キャッシュ更新と端末localStorageは別管理とし、公開更新で既存端末データを消去・置換しない。
 - ゲームロジックは入力状態を変更せず、新しい状態を返す。
 - テストは実コードの振る舞いを検証し、プロダクションコードを書く前に期待どおり失敗するREDを確認する。
 
@@ -28,6 +32,8 @@
 - 3回目の誤配と18通目の正解が、それぞれ一度だけ終了統計を更新すること（Task 1の終了テスト、Task 2の統計テスト）。
 - 妥当なJSONでもcursor範囲外やtickets件数不正なら復元しないこと（Task 2の意味検証テスト）。
 - 入力欄・ボタンにフォーカス中の数字キーで誤仕分けが発生しないこと（Task 3のブラウザ手動確認）。
+- GitHub Pages相当のサブパスでもmanifest・icons・worker・全app shellがscope内相対URLで解決されること（Task 4のmanifest/workerテストとネスト配信確認）。
+- 旧キャッシュ削除が他アプリのcacheを消さず、offline navigationがindexへfallbackすること（Task 4のworkerイベントテスト）。
 
 ---
 
@@ -44,6 +50,11 @@
 - `index.html`: セマンティックなゲーム画面骨格。
 - `styles.css`: テーマ、レスポンシブ、フォーカス、reduced-motion。
 - `README.md`: 起動、操作、テスト、保存仕様。
+- `src/pwa.js`: worker登録と更新通知。
+- `manifest.webmanifest`: standalone起動、相対scope/start URL、icons。
+- `sw.js`: app shell事前キャッシュ、旧version整理、network-first/offline fallback。
+- `assets/icon-180.png`, `assets/icon-192.png`, `assets/icon-512.png`: Apple/PWAアイコン。
+- `tests/pwa.test.js`: manifestと実Service Workerイベントの振る舞い。
 
 ### Task 1: 決定的な仕分けゲームエンジン
 
@@ -484,10 +495,217 @@ git add src/presenter.js tests/presenter.test.js src/app.js index.html styles.cs
 git commit -m "feat: deliver accessible moonlit sorting game"
 ```
 
+### Task 4: PWAオフライン化とGitHub Pages公開準備
+
+**Files:**
+- Create: `src/pwa.js`
+- Create: `manifest.webmanifest`
+- Create: `sw.js`
+- Create: `assets/icon-source.svg`
+- Create: `assets/icon-180.png`
+- Create: `assets/icon-192.png`
+- Create: `assets/icon-512.png`
+- Create: `tests/pwa.test.js`
+- Modify: `src/app.js`
+- Modify: `index.html`
+- Modify: `README.md`
+
+**Interfaces:**
+- Consumes: Task 3の `#save-status` 要素と静的app shell一式。
+- Produces: `registerPwa(onStatus)`（未対応時は`null`、対応時は登録Promise）、scope相対manifest、classic Service Workerのinstall/activate/fetchイベント、iPhone導入手順。
+
+- [ ] **Step 1: manifest・アイコン・workerの失敗テストを書く**
+
+`tests/pwa.test.js` はNode標準の `fs`, `vm`, `node:test` だけを使う。manifestをJSONとして読み、実際の`sw.js`をfake worker globalで実行するヘルパーを置く。期待値は実装の定数から計算せず、次のリテラルで検証する。
+
+```js
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { readFile } from 'node:fs/promises';
+import vm from 'node:vm';
+
+const expectedShell = [
+  './', './index.html', './styles.css', './src/app.js', './src/game.js',
+  './src/storage.js', './src/presenter.js', './src/pwa.js',
+  './manifest.webmanifest', './assets/icon-180.png',
+  './assets/icon-192.png', './assets/icon-512.png'
+];
+
+async function loadWorker(overrides = {}) {
+  const listeners = new Map();
+  const context = {
+    URL, Promise,
+    self: {
+      location: { origin: 'https://example.test' },
+      registration: { scope: 'https://example.test/moonlit-sorting-office/' },
+      addEventListener: (name, handler) => listeners.set(name, handler),
+      skipWaiting: async () => {},
+      clients: { claim: async () => {} }
+    },
+    caches: overrides.caches,
+    fetch: overrides.fetch
+  };
+  vm.runInNewContext(await readFile(new URL('../sw.js', import.meta.url), 'utf8'), context);
+  return { listeners, context };
+}
+
+test('manifest is standalone and every launch/icon URL is scope relative', async () => {
+  const manifest = JSON.parse(await readFile(new URL('../manifest.webmanifest', import.meta.url), 'utf8'));
+  assert.equal(manifest.name, '月影仕分け局');
+  assert.equal(manifest.start_url, './');
+  assert.equal(manifest.scope, './');
+  assert.equal(manifest.display, 'standalone');
+  assert.deepEqual(manifest.icons.map(({ src, sizes }) => [src, sizes]), [
+    ['./assets/icon-192.png', '192x192'],
+    ['./assets/icon-512.png', '512x512']
+  ]);
+});
+
+test('install precaches the complete relative app shell', async () => {
+  let openedName = '';
+  let added = [];
+  const caches = { open: async (name) => ({ addAll: async (urls) => { openedName = name; added = [...urls]; } }) };
+  const { listeners } = await loadWorker({ caches, fetch: async () => null });
+  let pending;
+  listeners.get('install')({ waitUntil: (promise) => { pending = promise; } });
+  await pending;
+  assert.equal(openedName, 'moonlit-sorting-office-v1');
+  assert.deepEqual(added, expectedShell);
+});
+
+test('activate removes only obsolete caches owned by this app', async () => {
+  const deleted = [];
+  const caches = {
+    keys: async () => ['moonlit-sorting-office-v0', 'moonlit-sorting-office-v1', 'another-app-v1'],
+    delete: async (name) => { deleted.push(name); return true; }
+  };
+  const { listeners } = await loadWorker({ caches, fetch: async () => null });
+  let pending;
+  listeners.get('activate')({ waitUntil: (promise) => { pending = promise; } });
+  await pending;
+  assert.deepEqual(deleted, ['moonlit-sorting-office-v0']);
+});
+```
+
+さらに次の2振る舞いを個別テストにする。
+
+- same-origin navigationで`fetch`がrejectしたとき、`caches.match('https://example.test/moonlit-sorting-office/index.html')`のResponseが`respondWith`から返る。
+- cross-origin GETとsame-origin POSTは`respondWith`を一度も呼ばない。
+
+PNGは先頭24byteのIHDR幅・高さを`readUInt32BE(16/20)`で読み、180/192/512の各ファイルが正方形の期待寸法であるテストを加える。
+
+- [ ] **Step 2: REDを確認する**
+
+Run: `npm test -- --test-name-pattern="manifest|install precaches|activate removes|navigation|cross-origin|PNG"`
+
+Expected: FAIL。manifest、worker、iconsが存在しないため読込に失敗する。
+
+- [ ] **Step 3: manifest、ソースアイコン、PNGアイコンを作る**
+
+`manifest.webmanifest` は次の機械可読契約を満たす。
+
+```json
+{
+  "name": "月影仕分け局",
+  "short_name": "月影仕分け",
+  "description": "深夜の航路郵便を規則に従って仕分ける作業ゲーム",
+  "lang": "ja",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "background_color": "#081525",
+  "theme_color": "#10263f",
+  "icons": [
+    { "src": "./assets/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any maskable" },
+    { "src": "./assets/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any maskable" }
+  ]
+}
+```
+
+`assets/icon-source.svg` は512×512、濃紺背景、中央80%の安全領域に生成り封筒と金色の三日月を置き、文字に依存しない単純な図形だけで作る。次の既存ローカル変換コマンドでPNGを生成し、生成物をコミットする（ffmpegは開発時だけで、ゲーム実行時依存ではない）。
+
+```powershell
+ffmpeg -y -i assets/icon-source.svg -vf scale=180:180 assets/icon-180.png
+ffmpeg -y -i assets/icon-source.svg -vf scale=192:192 assets/icon-192.png
+ffmpeg -y -i assets/icon-source.svg -vf scale=512:512 assets/icon-512.png
+```
+
+- [ ] **Step 4: classic Service Workerを最小実装する**
+
+`sw.js` はclassic scriptとし、cache名 `moonlit-sorting-office-v1`、テスト記載順のapp shellを持つ。installはcacheを開いて`addAll`後に`self.skipWaiting()`。activateはprefix `moonlit-sorting-office-` かつ現cache名以外だけを削除後`self.clients.claim()`。
+
+fetchは `request.method === 'GET'` かつ `new URL(request.url).origin === self.location.origin` のときだけ`respondWith`する。処理はnetwork-first: `fetch(request)`成功時、`response.ok`ならcloneを現cacheへ`put`して元responseを返す。失敗時は`caches.match(request)`、navigationならさらに `new URL('./index.html', self.registration.scope).href` をmatchし、どちらもなければthrowしてブラウザ標準エラーにする。
+
+- [ ] **Step 5: PWA登録とApple/GitHub Pages相対リンクを接続する**
+
+`src/pwa.js` の公開関数は次の形にする。
+
+```js
+export function registerPwa(onStatus = () => {}) {
+  if (!('serviceWorker' in navigator)) return null;
+  return navigator.serviceWorker.register('./sw.js', { scope: './' })
+    .then((registration) => {
+      if (registration.waiting) onStatus('更新版を利用できます。再読み込みしてください');
+      registration.addEventListener('updatefound', () => {
+        const worker = registration.installing;
+        worker?.addEventListener('statechange', () => {
+          if (worker.state === 'installed' && navigator.serviceWorker.controller) {
+            onStatus('更新版を利用できます。再読み込みしてください');
+          }
+        });
+      });
+      return registration;
+    })
+    .catch(() => { onStatus('オフライン準備を完了できませんでした'); return null; });
+}
+```
+
+`src/app.js` は初期描画後に`registerPwa`を呼び、通知を`#save-status`へ表示する。`index.html` headへ相対manifest、180px Apple icon、theme-color、`apple-mobile-web-app-capable=yes`、`apple-mobile-web-app-title=月影仕分け局`、`apple-mobile-web-app-status-bar-style=black-translucent`を追加する。root絶対パスを作らない。
+
+- [ ] **Step 6: PWAテストのGREENと全検証を確認する**
+
+Run: `npm test`
+
+Expected: 19 tests以上 PASS、0 fail、警告なし。
+
+Run: `Get-ChildItem src,tests -Filter *.js -Recurse | ForEach-Object { node --check $_.FullName }; node --check sw.js`
+
+Expected: 全ファイルexit 0。
+
+Run: `rg -n '(href|src|register|start_url|scope)\s*[:=]\s*["'"']/+' index.html manifest.webmanifest src sw.js`
+
+Expected: root絶対パスmatchなし。
+
+- [ ] **Step 7: READMEへiPhone導入・公開・データ境界を書く**
+
+READMEへ次を具体的に追記する。
+
+- 想定repo `moonlit-sorting-office` と想定URL `https://jueyuedao-ship-it.github.io/moonlit-sorting-office/`。
+- GitHub Pagesはmain branch rootからHTTPS公開し、すべて相対パスなのでrepoサブパスで動くこと。
+- iPhone SafariでURLを開く→共有→「ホーム画面に追加」→追加後アイコンから一度オンライン起動→以後オフライン利用、の順。
+- 更新時はオンラインで再度開いて更新通知後に再読込。反映しない場合はSafariタブとホーム画面アプリを閉じて再起動する。
+- 勤務データは各端末・各browser originのlocalStorageだけにあり、GitHubソース/Service Workerキャッシュ更新とは別。公開更新は既存データを同期・移行・削除せず、Safariサイトデータ削除では失われる。
+- `gh auth status`、remote、同名repoの確認後だけrepo作成/push/Pages設定し、既存repoを上書きしない公開手順。
+
+- [ ] **Step 8: Service Worker管理下の実ブラウザ・offline・サブパス確認をする**
+
+単純サーバーをプロジェクト親から起動し、`/moonlit-sorting-office/` のようなネストURLで配信する。ブラウザでmanifestとworker scopeを確認し、一度全app shellを読込後offlineへ切り替えて再読込する。ゲーム画面が出て途中状態が復元され、数字キー/クリックを続行できること、コンソールに例外がないことを記録する。onlineへ戻し、再読込後もlocalStorage状態が残ることを確認する。
+
+- [ ] **Step 9: 自己レビューしてコミットする**
+
+app shellと実ファイル一覧、manifest icon寸法、cache prefix削除範囲、Pages相対パス、READMEのiPhone手順を突き合わせる。
+
+```bash
+git add src/pwa.js src/app.js index.html manifest.webmanifest sw.js assets tests/pwa.test.js README.md
+git commit -m "feat: make the sorting office an offline PWA"
+```
+
 ## Final Verification
 
 - [ ] `npm test` を最終HEADで実行し、全件PASSと0 failを記録する。
 - [ ] `node --check` を全JSへ実行し、exit 0を記録する。
 - [ ] 最終ブラウザ実プレイで開始・仕分け・区間変更・再読込復元・結果を確認する。
+- [ ] Service Worker管理下でoffline再読込・ゲーム続行・localStorage復元を確認する。
+- [ ] GitHub Pages相当のサブパスでmanifest/icons/worker scopeの相対解決を確認する。
 - [ ] `git status --short` で意図しない未追跡/変更がないことを確認する。
 - [ ] 全体コードレビューを最終ブランチ差分に対して実施する。

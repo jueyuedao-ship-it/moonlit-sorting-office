@@ -2,7 +2,7 @@
 
 ## 目的と判断
 
-ユーザーが操作をほぼ委任した状態で、1セッション内に完成・自動テスト・実プレイ確認まで到達できる、ローカル完結のブラウザ作業ゲームを作る。外部API、CDN、ビルド工程、実行時ネットワーク通信は使わない。
+ユーザーが操作をほぼ委任した状態で、1セッション内に完成・自動テスト・実プレイ確認まで到達できる、ローカルファーストのブラウザ作業ゲームを作る。外部API、CDN、ビルド工程、ゲーム実行時の必須ネットワーク通信は使わない。GitHub Pagesへ静的公開でき、iPhone Safariからホーム画面に追加した後はオフラインでも遊べるPWAとする。
 
 候補は次の3案を比較した。
 
@@ -14,11 +14,12 @@
 
 ## 成功条件
 
-- `index.html` をローカルHTTPサーバーから開くだけで遊べる。
+- `index.html` をローカルHTTPサーバーまたはGitHub PagesのHTTPS URLから開くだけで遊べる。
 - 18通を最後まで処理するか、3回誤配すると勤務終了になる。
 - 1プレイが約3〜6分で、ルール確認、判定、即時フィードバック、連続正解の上達感がある。
 - マウスだけでも、キーボードの `1` / `2` / `3` だけでも主要ループを完遂できる。
 - ページ再読み込み後も進行中の勤務を再開でき、勤務終了後は最高得点と累計勤務数が残る。
+- iPhone Safariでホーム画面へ追加でき、初回オンライン読込後はオフライン起動できる。
 - 純粋なゲームロジックと保存処理は Node.js 標準テストランナーで自動検証できる。
 
 ## ゲームループ
@@ -68,8 +69,12 @@
 - `src/game.js`: ドメイン定数、シード付きデッキ生成、判定、スコア計算、状態遷移。DOM・localStorageに依存しない。
 - `src/storage.js`: version 1 の保存形式、検証、読込、書込、破損データ時の安全な初期化。Storage互換オブジェクトを注入できる。
 - `src/app.js`: DOM描画、イベント、キーボード操作、ゲーム状態と保存処理の接続。
+- `src/pwa.js`: Service Worker登録と更新通知のDOM非依存ラッパー。
 - `index.html`: セマンティックな画面骨格。
 - `styles.css`: レスポンシブ表示、フォーカス、配色、モーション制御。
+- `manifest.webmanifest`: 相対start URL・scope、standalone表示、アイコン宣言。
+- `sw.js`: version付きapp shellキャッシュ、旧キャッシュ削除、同一origin GETのnetwork-first/offline fallback。
+- `assets/icon-180.png`, `assets/icon-192.png`, `assets/icon-512.png`: Apple touch iconとPWA用のローカルアイコン。
 - `tests/game.test.js`, `tests/storage.test.js`: Node.js標準 `node:test` による実コードの振る舞いテスト。
 
 ゲーム状態の公開形は次の通り。
@@ -106,6 +111,20 @@
 
 `playing` の勤務は各入力後に保存し、再読み込みで同じ票から再開する。`won` / `failed` の結果も保存し、結果画面を復元する。新規勤務開始時は新しい状態で上書きする。JSON破損、未知version、必須フィールド欠落は例外を画面へ漏らさず初期値へ戻す。保存不可でもゲームは継続し、ヘッダーに「この端末では保存できません」と表示する。
 
+保存はoriginごとの端末localStorageであり、同期機能ではない。GitHub上のソースやService Workerキャッシュを更新しても、すでに各iPhone/ブラウザにある勤務データを移行・置換・削除しない。同じURLでもSafariのサイトデータ削除や別端末では別データになる。この境界をREADMEの導入・更新説明へ明記する。
+
+## PWA・公開設計
+
+想定GitHubリポジトリ名は `moonlit-sorting-office`、想定Pages URLは `https://jueyuedao-ship-it.github.io/moonlit-sorting-office/`。実際のリポジトリ作成前に同名repoとremoteの有無を確認し、既存repoへ上書きしない。
+
+GitHub Pagesのサブパスで動かすため、HTML、manifest、Service Worker、キャッシュ一覧はすべて `./` 基準の相対パスを使い、`/src/...` のようなorigin-root絶対パスを使わない。manifestは `start_url: "./"`, `scope: "./"`, `display: "standalone"` とし、192px/512px PNGを `any` と `maskable` 用途で宣言する。`index.html` はmanifest、180px Apple touch icon、`apple-mobile-web-app-capable`、アプリ名、theme-color、viewportを宣言する。
+
+Service Workerはworker自身と同じディレクトリをscopeに登録する。installでHTML/CSS/全JS/manifest/iconsをversion付きキャッシュへ事前保存する。activateでこのアプリのprefixに一致する旧versionキャッシュだけを削除し、他アプリのキャッシュへ触れない。同一originのGETだけを扱い、オンライン時はnetwork-firstで応答とキャッシュを更新、失敗時は一致キャッシュへfallbackする。navigation失敗時はscope内の`index.html`を返す。異なるorigin、非GET、ブラウザ拡張schemeは素通しする。
+
+キャッシュ名は `moonlit-sorting-office-v1` から始め、app shellの内容を変更するリリースごとに末尾versionを上げる。新workerは `skipWaiting()`、activateは `clients.claim()` を行い、アプリはworkerの更新適用を検知したら「更新版を利用できます。再読み込みしてください」と非侵襲的に通知する。localStorageのversionはService Workerキャッシュversionとは独立に管理する。
+
+公開前にHTTPS/相対パス、manifest取得、アイコン取得、Service Worker登録、offline再読込を実ブラウザで確認する。GitHub CLI認証やPages設定経路が使えない場合も、公開可能なmain状態と手順を完成させ、認証待ちを実装の阻害要因にしない。
+
 ## アクセシビリティ
 
 - 主要領域を `header`, `main`, `section`, `aside` で構成し、各領域に見出しを置く。
@@ -137,15 +156,16 @@
 
 - `node --check` で全JavaScriptの構文を確認する。
 - HTMLに外部URL依存がないことを確認する。
+- manifestの必須値・相対パスとService Workerのinstall/activate/fetchを自動テストする。
 
 ### 実プレイ確認
 
-ローカルHTTPサーバーで開き、開始→キーとクリックの両方で仕分け→区間変更→結果画面まで進める。途中で再読み込みし、得点・処理数・現在票が一致して復元されることを確認する。狭幅表示、フォーカス表示、主要ARIAラベルもブラウザ上で確認する。
+ローカルHTTPサーバーで開き、開始→キーとクリックの両方で仕分け→区間変更→結果画面まで進める。途中で再読み込みし、得点・処理数・現在票が一致して復元されることを確認する。狭幅表示、フォーカス表示、主要ARIAラベルもブラウザ上で確認する。Service Worker管理下で一度読み込んだ後にサーバーを停止またはブラウザをofflineへ切り替え、再読込・ゲーム継続・localStorage復元を確認する。可能ならmanifest/Service WorkerのscopeがGitHub Pages相当のサブパスでも解決されることをローカルのネストURLで確認する。
 
 ## 対象外
 
 - オンラインランキング、ログイン、クラウド同期。
-- 音声、外部画像、PWA化、インストール機能。
+- 音声、外部画像素材。
 - 複数難易度、無限モード、日替わり配信。
 - 既存データの移行（version 1 が初版）。
 
