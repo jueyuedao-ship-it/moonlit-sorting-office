@@ -1,6 +1,7 @@
 import { createGame, getCheckpointDistrict, submitChoice } from './game.js';
 import { loadSave, recordFinishedShift, saveState } from './storage.js';
 import { DESTINATION_LABELS, SEAL_LABELS, WEIGHT_LABELS, toViewModel } from './presenter.js';
+import { presentHeaderStatus } from './header-status.js';
 import { registerPwa } from './pwa.js';
 
 const TERMINAL_STATUSES = new Set(['won', 'failed']);
@@ -27,6 +28,8 @@ let focusTicketAfterRender = false;
 
 const elements = {
   saveStatus: document.querySelector('#save-status'),
+  pwaStatus: document.querySelector('#pwa-status'),
+  shiftStatus: document.querySelector('#shift-status'),
   introPanel: document.querySelector('#intro-panel'),
   gamePanel: document.querySelector('#game-panel'),
   resultPanel: document.querySelector('#result-panel'),
@@ -59,6 +62,17 @@ function renderIntro(view) {
   `;
   const startButton = elements.introPanel.querySelector('#start-button');
   startButton.addEventListener('click', startShift);
+}
+
+function renderHeader(view) {
+  const status = presentHeaderStatus({
+    saveMessage,
+    pwaMessage,
+    gameStatus: view.mode
+  });
+  elements.saveStatus.textContent = status.saveStatus;
+  elements.pwaStatus.textContent = status.pwaStatus;
+  elements.shiftStatus.textContent = status.shiftStatus;
 }
 
 function renderStatus(view) {
@@ -138,7 +152,7 @@ function renderResult(view) {
 function render() {
   const game = save.activeGame;
   const view = toViewModel(game, save.stats);
-  elements.saveStatus.textContent = pwaMessage || saveMessage;
+  renderHeader(view);
   const showingGame = game?.status === 'playing';
   const showingResult = TERMINAL_STATUSES.has(game?.status);
   elements.introPanel.hidden = showingGame || showingResult;
@@ -209,5 +223,5 @@ document.addEventListener('keydown', (event) => {
 render();
 registerPwa((message) => {
   pwaMessage = message;
-  elements.saveStatus.textContent = message;
+  render();
 });

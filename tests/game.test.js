@@ -5,6 +5,36 @@ import {
   submitChoice, isGameState
 } from '../src/game.js';
 
+function startGame(seed) {
+  return { ...createGame(seed), status: 'playing' };
+}
+
+function expectedDestination(state) {
+  return classifyTicket(state.tickets[state.cursor], getCheckpointDistrict(state.cursor)).destination;
+}
+
+function wrongDestination(state) {
+  const expected = expectedDestination(state);
+  return [DESTINATIONS.EXPRESS, DESTINATIONS.REVIEW, DESTINATIONS.REGULAR]
+    .find((destination) => destination !== expected);
+}
+
+function finishWon(seed) {
+  let state = startGame(seed);
+  while (state.status === 'playing') {
+    state = submitChoice(state, expectedDestination(state));
+  }
+  return state;
+}
+
+function finishFailed(seed) {
+  let state = startGame(seed);
+  while (state.status === 'playing') {
+    state = submitChoice(state, wrongDestination(state));
+  }
+  return state;
+}
+
 test('same seed creates the same constrained 18-ticket shift', () => {
   const first = createGame(12345);
   const second = createGame(12345);
@@ -46,23 +76,22 @@ test('correct answer advances and scores from the new streak', () => {
 });
 
 test('third mistake fails immediately and later input is ignored', () => {
-  let state = { ...createGame(8), status: 'playing', mistakes: 2 };
-  const expected = classifyTicket(state.tickets[0], getCheckpointDistrict(0)).destination;
-  const wrong = ['express', 'review', 'regular'].find((value) => value !== expected);
-  state = submitChoice(state, wrong);
+  let state = startGame(8);
+  state = submitChoice(state, wrongDestination(state));
+  state = submitChoice(state, wrongDestination(state));
+  const expected = expectedDestination(state);
+  state = submitChoice(state, wrongDestination(state));
   assert.equal(state.status, 'failed');
   assert.equal(state.mistakes, 3);
   assert.equal(submitChoice(state, expected), state);
 });
 
 test('eighteenth processed ticket wins and streak bonus is capped', () => {
-  let state = { ...createGame(9), status: 'playing', cursor: 17, streak: 14, bestStreak: 14, score: 1000 };
-  const expected = classifyTicket(state.tickets[17], getCheckpointDistrict(17)).destination;
-  state = submitChoice(state, expected);
+  const state = finishWon(9);
   assert.equal(state.status, 'won');
   assert.equal(state.cursor, 18);
-  assert.equal(state.score, 1200);
-  assert.equal(state.bestStreak, 15);
+  assert.equal(state.score, 3150);
+  assert.equal(state.bestStreak, 18);
 });
 
 test('invalid destinations and internally inconsistent states are rejected', () => {
@@ -75,18 +104,42 @@ test('invalid destinations and internally inconsistent states are rejected', () 
 });
 
 test('terminal status relationships are required for a game state', () => {
-  const ready = createGame(11);
-  assert.equal(isGameState({ ...ready, status: 'playing', cursor: 18 }), false);
-  assert.equal(isGameState({ ...ready, status: 'playing', mistakes: 3 }), false);
-  assert.equal(isGameState({ ...ready, status: 'won', cursor: 17 }), false);
-  assert.equal(isGameState({ ...ready, status: 'won', cursor: 18, mistakes: 3 }), false);
-  assert.equal(isGameState({ ...ready, status: 'failed', mistakes: 2 }), false);
-  assert.equal(isGameState({ ...ready, status: 'failed', mistakes: 3 }), true);
+  const won = finishWon(11);
+  const failed = finishFailed(12);
+  assert.equal(isGameState({ ...won, cursor: 17 }), false);
+  assert.equal(isGameState({ ...won, mistakes: 3 }), false);
+  assert.equal(isGameState({ ...failed, mistakes: 2 }), false);
+  assert.equal(isGameState(won), true);
+  assert.equal(isGameState(failed), true);
 });
 
 test('a terminal-looking playing state is ignored instead of crashing on a missing ticket', () => {
-  const state = { ...createGame(12), status: 'playing', cursor: 18 };
+  const state = { ...createGame(13), status: 'playing', cursor: 18 };
   assert.doesNotThrow(() => submitChoice(state, DESTINATIONS.REGULAR));
   assert.equal(isGameState(state), false);
   assert.equal(submitChoice(state, DESTINATIONS.REGULAR), state);
+});
+
+test('game state cursor is exactly the sum of correct answers and mistakes', () => {
+  const playing = startGame(14);
+  assert.equal(isGameState({ ...playing, cursor: 1 }), false);
+  assert.equal(isGameState({ ...playing, cursor: 1, mistakes: 1 }), true);
+  assert.equal(isGameState({ ...playing, cursor: 1, correct: 1 }), true);
+});
+
+test('ready state has no counters, score, or feedback', () => {
+  const ready = createGame(15);
+  assert.equal(isGameState(ready), true);
+  assert.equal(isGameState({ ...ready, score: 1 }), false);
+  assert.equal(isGameState({ ...ready, mistakes: 1 }), false);
+  assert.equal(isGameState({ ...ready, streak: 1 }), false);
+  assert.equal(isGameState({ ...ready, bestStreak: 1 }), false);
+  assert.equal(isGameState({ ...ready, correct: 1 }), false);
+  assert.equal(isGameState({ ...ready, lastFeedback: { correct: true, chosen: 'regular', expected: 'regular', reason: 'ok' } }), false);
+});
+
+test('best streak cannot exceed correct answers and streak cannot exceed best streak', () => {
+  const playing = startGame(16);
+  assert.equal(isGameState({ ...playing, bestStreak: 1 }), false);
+  assert.equal(isGameState({ ...playing, streak: 1, bestStreak: 0 }), false);
 });

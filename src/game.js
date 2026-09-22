@@ -141,10 +141,24 @@ export function isGameState(value) {
     && isIntegerInRange(value.mistakes, 0, MAX_MISTAKES)
     && isIntegerInRange(value.streak)
     && isIntegerInRange(value.bestStreak)
+    && value.cursor === value.correct + value.mistakes
+    && value.bestStreak <= value.correct
     && value.bestStreak >= value.streak
     && isIntegerInRange(value.correct, 0, SHIFT_SIZE)
     && value.correct <= value.cursor
     && isFeedback(value.lastFeedback)
+    && (
+      value.status !== 'ready'
+      || (
+        value.cursor === 0
+        && value.score === 0
+        && value.mistakes === 0
+        && value.streak === 0
+        && value.bestStreak === 0
+        && value.correct === 0
+        && value.lastFeedback === null
+      )
+    )
     && (
       value.status === 'ready'
       || (value.status === 'playing' && value.cursor < SHIFT_SIZE && value.mistakes < MAX_MISTAKES)

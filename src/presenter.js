@@ -37,7 +37,7 @@ export function toViewModel(game, stats = {}) {
     mode: game?.status ?? 'ready',
     ticket,
     checkpointDistrict: getCheckpointDistrict(cursor),
-    progressText: playing ? `${cursor + 1} / 18通` : `${processed} / 18通`,
+    progressText: `${processed} / 18通`,
     scoreText: `得点 ${game?.score ?? 0}`,
     mistakesText: `誤配 ${game?.mistakes ?? 0} / 3`,
     streakText: `連続正解 ${game?.streak ?? 0}`,

@@ -1,8 +1,8 @@
-const CACHE_NAME = 'moonlit-sorting-office-v1';
+const CACHE_NAME = 'moonlit-sorting-office-v2';
 const CACHE_PREFIX = 'moonlit-sorting-office-';
 const APP_SHELL = [
   './', './index.html', './styles.css', './src/app.js', './src/game.js',
-  './src/storage.js', './src/presenter.js', './src/pwa.js',
+  './src/storage.js', './src/presenter.js', './src/header-status.js', './src/pwa.js',
   './manifest.webmanifest', './assets/icon-180.png',
   './assets/icon-192.png', './assets/icon-512.png'
 ];

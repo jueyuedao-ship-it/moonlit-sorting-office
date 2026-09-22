@@ -15,6 +15,7 @@ export function createDefaultSave() {
 }
 
 function isValidSave(value) {
+  const terminalGame = value?.activeGame?.status === 'won' || value?.activeGame?.status === 'failed';
   return value !== null
     && typeof value === 'object'
     && value.version === SAVE_VERSION
@@ -24,7 +25,11 @@ function isValidSave(value) {
     && Number.isInteger(value.stats.bestScore)
     && value.stats.bestScore >= 0
     && Number.isInteger(value.stats.shiftsCompleted)
-    && value.stats.shiftsCompleted >= 0;
+    && value.stats.shiftsCompleted >= 0
+    && (!terminalGame || (
+      value.stats.shiftsCompleted >= 1
+      && value.stats.bestScore >= value.activeGame.score
+    ));
 }
 
 export function loadSave(storage) {

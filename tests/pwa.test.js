@@ -6,7 +6,7 @@ import { registerPwa } from '../src/pwa.js';
 
 const expectedShell = [
   './', './index.html', './styles.css', './src/app.js', './src/game.js',
-  './src/storage.js', './src/presenter.js', './src/pwa.js',
+  './src/storage.js', './src/presenter.js', './src/header-status.js', './src/pwa.js',
   './manifest.webmanifest', './assets/icon-180.png',
   './assets/icon-192.png', './assets/icon-512.png'
 ];
@@ -56,7 +56,7 @@ test('install precaches the complete relative app shell', async () => {
   let pending;
   listeners.get('install')({ waitUntil: (promise) => { pending = promise; } });
   await pending;
-  assert.equal(openedName, 'moonlit-sorting-office-v1');
+  assert.equal(openedName, 'moonlit-sorting-office-v2');
   assert.deepEqual(added, expectedShell);
   assert.equal(skipped, true);
 });
@@ -73,7 +73,7 @@ test('activate removes only obsolete caches owned by this app', async () => {
   let pending;
   listeners.get('activate')({ waitUntil: (promise) => { pending = promise; } });
   await pending;
-  assert.deepEqual(deleted, ['moonlit-sorting-office-v0']);
+  assert.deepEqual(deleted, ['moonlit-sorting-office-v0', 'moonlit-sorting-office-v1']);
   assert.equal(claimed, true);
 });
 

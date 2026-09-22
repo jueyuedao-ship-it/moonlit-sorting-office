@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { createGame } from '../src/game.js';
+import { DESTINATIONS, classifyTicket, createGame, getCheckpointDistrict, submitChoice } from '../src/game.js';
 import { STORAGE_KEY, createDefaultSave, loadSave, saveState, recordFinishedShift } from '../src/storage.js';
 
 function memoryStorage(initial = {}) {
@@ -12,9 +12,37 @@ function memoryStorage(initial = {}) {
   };
 }
 
+function startGame(seed) {
+  return { ...createGame(seed), status: 'playing' };
+}
+
+function expectedDestination(state) {
+  return classifyTicket(state.tickets[state.cursor], getCheckpointDistrict(state.cursor)).destination;
+}
+
+function wrongDestination(state) {
+  const expected = expectedDestination(state);
+  return [DESTINATIONS.EXPRESS, DESTINATIONS.REVIEW, DESTINATIONS.REGULAR]
+    .find((destination) => destination !== expected);
+}
+
+function finishWon(seed) {
+  let state = startGame(seed);
+  while (state.status === 'playing') state = submitChoice(state, expectedDestination(state));
+  return state;
+}
+
+function finishFailed(seed) {
+  let state = startGame(seed);
+  while (state.status === 'playing') state = submitChoice(state, wrongDestination(state));
+  return state;
+}
+
 test('valid save round-trips active game and stats', () => {
   const storage = memoryStorage();
-  const activeGame = { ...createGame(42), status: 'playing', cursor: 2, score: 230 };
+  let activeGame = startGame(42);
+  activeGame = submitChoice(activeGame, expectedDestination(activeGame));
+  activeGame = submitChoice(activeGame, expectedDestination(activeGame));
   const save = { version: 1, activeGame, stats: { bestScore: 900, shiftsCompleted: 4 } };
   assert.deepEqual(saveState(storage, save), { value: save, error: null });
   assert.deepEqual(loadSave(storage), { value: save, error: null });
@@ -23,9 +51,9 @@ test('valid save round-trips active game and stats', () => {
 
 test('finished shifts update stats without mutating the previous save', () => {
   const before = createDefaultSave();
-  const game = { ...createGame(3), status: 'won', cursor: 18, score: 740 };
+  const game = finishWon(3);
   const after = recordFinishedShift(before, game);
-  assert.deepEqual(after.stats, { bestScore: 740, shiftsCompleted: 1 });
+  assert.deepEqual(after.stats, { bestScore: game.score, shiftsCompleted: 1 });
   assert.deepEqual(before.stats, { bestScore: 0, shiftsCompleted: 0 });
   assert.equal(after.activeGame, game);
 });
@@ -39,7 +67,7 @@ test('recordFinishedShift ignores invalid terminal-looking games', () => {
 test('valid terminal results survive a save and load round-trip', () => {
   const storage = memoryStorage();
   const before = createDefaultSave();
-  const validWon = { ...createGame(13), status: 'won', cursor: 18, score: 740 };
+  const validWon = finishWon(13);
   const save = recordFinishedShift(before, validWon);
 
   assert.deepEqual(saveState(storage, save), { value: save, error: null });
@@ -65,10 +93,29 @@ test('storage exceptions are reported without throwing', () => {
 });
 
 test('recordFinishedShift ignores active games and does not double count identical result object', () => {
-  const active = { ...createGame(5), status: 'playing' };
+  const active = startGame(5);
   const initial = createDefaultSave();
   assert.equal(recordFinishedShift(initial, active), initial);
-  const finished = { ...active, status: 'failed', mistakes: 3 };
+  const finished = finishFailed(5);
   const once = recordFinishedShift(initial, finished);
   assert.equal(recordFinishedShift(once, finished), once);
+});
+
+test('terminal active games require completed stats and a score at least as high as the result', () => {
+  const won = finishWon(17);
+  const invalidSaves = [
+    { version: 1, activeGame: won, stats: { bestScore: 0, shiftsCompleted: 0 } },
+    { version: 1, activeGame: won, stats: { bestScore: won.score - 1, shiftsCompleted: 1 } }
+  ];
+  for (const save of invalidSaves) {
+    assert.deepEqual(loadSave(memoryStorage({ [STORAGE_KEY]: JSON.stringify(save) })).value, createDefaultSave());
+  }
+  const validSave = { version: 1, activeGame: won, stats: { bestScore: won.score, shiftsCompleted: 1 } };
+  assert.deepEqual(loadSave(memoryStorage({ [STORAGE_KEY]: JSON.stringify(validSave) })), { value: validSave, error: null });
+});
+
+test('legitimate playing saves remain valid before any shift is completed', () => {
+  const activeGame = startGame(18);
+  const save = { version: 1, activeGame, stats: { bestScore: 0, shiftsCompleted: 0 } };
+  assert.deepEqual(loadSave(memoryStorage({ [STORAGE_KEY]: JSON.stringify(save) })), { value: save, error: null });
 });
