@@ -1,0 +1,37 @@
+<!doctype html>
+<html lang="ja">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="theme-color" content="#111c32">
+    <title>月影仕分け局</title>
+    <link rel="stylesheet" href="./styles.css">
+  </head>
+  <body>
+    <header class="masthead">
+      <div>
+        <p class="eyebrow">午前零時の航路郵便</p>
+        <h1>月影仕分け局</h1>
+      </div>
+      <p id="save-status" role="status">端末内に自動保存</p>
+    </header>
+    <main>
+      <section id="intro-panel" aria-labelledby="intro-title"></section>
+      <section id="game-panel" hidden aria-labelledby="ticket-title">
+        <div id="status-strip" aria-label="勤務状況" aria-live="polite"></div>
+        <div class="game-grid">
+          <aside id="rulebook" aria-labelledby="rules-title"></aside>
+          <article id="ticket-card" aria-labelledby="ticket-title" tabindex="-1"></article>
+        </div>
+        <div id="sorting-controls" aria-label="仕分け先">
+          <button type="button" data-destination="express"><kbd>1</kbd> 特急便</button>
+          <button type="button" data-destination="review"><kbd>2</kbd> 確認台</button>
+          <button type="button" data-destination="regular"><kbd>3</kbd> 通常便</button>
+        </div>
+        <p id="feedback" aria-live="polite"></p>
+      </section>
+      <section id="result-panel" hidden aria-labelledby="result-title" aria-live="polite"></section>
+    </main>
+    <script type="module" src="./src/app.js"></script>
+  </body>
+</html>
