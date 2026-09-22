@@ -9,6 +9,20 @@ python -m http.server 4173
 # http://localhost:4173/
 ```
 
+## GitHub Pages公開とiPhone導入
+
+想定するリポジトリ名は `moonlit-sorting-office`、公開URLは `https://jueyuedao-ship-it.github.io/moonlit-sorting-office/` です。GitHub Pagesは `main` ブランチのリポジトリルートからHTTPSで公開します。HTML、manifest、Service Worker、アイコンはすべてスコープ相対のパスなので、リポジトリのサブパスでも動作します。
+
+公開前に次の順で安全を確認してください。
+
+1. `gh auth status` でログイン状態を確認する。
+2. `git remote -v` で接続先を確認し、同名の既存リポジトリがないことを確認する。
+3. 既存リポジトリを上書きしないと確認できた場合だけ、リポジトリ作成・push・Pages（main / root）設定を行う。
+
+iPhone Safariでは、URLを開く → 共有 → 「ホーム画面に追加」 → 追加されたアイコンから一度オンラインで起動、の順に進めてください。初回のapp shell読込後はオフラインでも利用できます。更新時はオンラインで再度開き、更新通知が表示されたら再読み込みしてください。反映しない場合はSafariのタブとホーム画面アプリを閉じてから再起動します。
+
+勤務データは各端末・各ブラウザ・各originの `localStorage` にだけ保存されます。GitHubのソース更新やService Workerキャッシュ更新は、既存データを同期・移行・削除しません。Safariのサイトデータを削除した場合や別端末では保存内容は引き継がれません。
+
 ## 操作
 
 - `1`: 特急便

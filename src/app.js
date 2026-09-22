@@ -1,6 +1,7 @@
 import { createGame, getCheckpointDistrict, submitChoice } from './game.js';
 import { loadSave, recordFinishedShift, saveState } from './storage.js';
 import { DESTINATION_LABELS, SEAL_LABELS, WEIGHT_LABELS, toViewModel } from './presenter.js';
+import { registerPwa } from './pwa.js';
 
 const TERMINAL_STATUSES = new Set(['won', 'failed']);
 
@@ -20,6 +21,7 @@ let saveMessage = loaded.error === 'load-unavailable'
   : loaded.error === 'invalid-save'
     ? '保存データを初期化しました'
     : '端末内に自動保存';
+let pwaMessage = '';
 let sectionNotice = '';
 let focusTicketAfterRender = false;
 
@@ -136,7 +138,7 @@ function renderResult(view) {
 function render() {
   const game = save.activeGame;
   const view = toViewModel(game, save.stats);
-  elements.saveStatus.textContent = saveMessage;
+  elements.saveStatus.textContent = pwaMessage || saveMessage;
   const showingGame = game?.status === 'playing';
   const showingResult = TERMINAL_STATUSES.has(game?.status);
   elements.introPanel.hidden = showingGame || showingResult;
@@ -205,3 +207,7 @@ document.addEventListener('keydown', (event) => {
 });
 
 render();
+registerPwa((message) => {
+  pwaMessage = message;
+  elements.saveStatus.textContent = message;
+});
