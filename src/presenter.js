@@ -42,6 +42,9 @@ export function toViewModel(game, stats = {}) {
     mistakesText: `誤配 ${game?.mistakes ?? 0} / 3`,
     streakText: `連続正解 ${game?.streak ?? 0}`,
     feedbackText: feedbackText(game?.lastFeedback),
+    feedbackTone: game?.lastFeedback
+      ? game.lastFeedback.correct ? 'success' : 'error'
+      : '',
     resultText,
     controlsDisabled: !playing
   };

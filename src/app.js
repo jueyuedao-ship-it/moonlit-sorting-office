@@ -114,6 +114,11 @@ function renderGame(view) {
   renderTicket(view);
   renderControls(view);
   elements.feedback.textContent = view.feedbackText;
+  if (view.feedbackTone) {
+    elements.feedback.dataset.tone = view.feedbackTone;
+  } else {
+    delete elements.feedback.dataset.tone;
+  }
 }
 
 function renderResult(view) {

@@ -23,3 +23,14 @@ test('feedback and result text explain the outcome without relying on color', ()
   assert.match(view.resultText, /誤配が3回/);
   assert.equal(view.controlsDisabled, true);
 });
+
+test('feedback view model gives correct and incorrect outcomes distinct tones', () => {
+  const ready = { ...createGame(23), status: 'playing' };
+  const expected = classifyTicket(ready.tickets[0], getCheckpointDistrict(0)).destination;
+  const success = toViewModel(submitChoice(ready, expected), { bestScore: 0, shiftsCompleted: 0 });
+  assert.equal(success.feedbackTone, 'success');
+
+  const wrong = ['express', 'review', 'regular'].find((value) => value !== expected);
+  const error = toViewModel(submitChoice(ready, wrong), { bestScore: 0, shiftsCompleted: 0 });
+  assert.equal(error.feedbackTone, 'error');
+});
