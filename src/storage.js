@@ -62,7 +62,7 @@ export function saveState(storage, save) {
 }
 
 export function recordFinishedShift(save, game) {
-  if (game?.status !== 'won' && game?.status !== 'failed') {
+  if (!isGameState(game) || (game.status !== 'won' && game.status !== 'failed')) {
     return save;
   }
   if (save.activeGame === game) {

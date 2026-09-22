@@ -23,11 +23,27 @@ test('valid save round-trips active game and stats', () => {
 
 test('finished shifts update stats without mutating the previous save', () => {
   const before = createDefaultSave();
-  const game = { ...createGame(3), status: 'won', score: 740 };
+  const game = { ...createGame(3), status: 'won', cursor: 18, score: 740 };
   const after = recordFinishedShift(before, game);
   assert.deepEqual(after.stats, { bestScore: 740, shiftsCompleted: 1 });
   assert.deepEqual(before.stats, { bestScore: 0, shiftsCompleted: 0 });
   assert.equal(after.activeGame, game);
+});
+
+test('recordFinishedShift ignores invalid terminal-looking games', () => {
+  const before = createDefaultSave();
+  const invalidWon = { ...createGame(6), status: 'won', score: 500 };
+  assert.equal(recordFinishedShift(before, invalidWon), before);
+});
+
+test('valid terminal results survive a save and load round-trip', () => {
+  const storage = memoryStorage();
+  const before = createDefaultSave();
+  const validWon = { ...createGame(13), status: 'won', cursor: 18, score: 740 };
+  const save = recordFinishedShift(before, validWon);
+
+  assert.deepEqual(saveState(storage, save), { value: save, error: null });
+  assert.deepEqual(loadSave(storage), { value: save, error: null });
 });
 
 test('corrupt, unknown, or inconsistent saves fall back safely', () => {
