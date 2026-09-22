@@ -144,11 +144,20 @@ export function isGameState(value) {
     && value.bestStreak >= value.streak
     && isIntegerInRange(value.correct, 0, SHIFT_SIZE)
     && value.correct <= value.cursor
-    && isFeedback(value.lastFeedback);
+    && isFeedback(value.lastFeedback)
+    && (
+      value.status === 'ready'
+      || (value.status === 'playing' && value.cursor < SHIFT_SIZE && value.mistakes < MAX_MISTAKES)
+      || (value.status === 'won' && value.cursor === SHIFT_SIZE && value.mistakes < MAX_MISTAKES)
+      || (value.status === 'failed' && value.mistakes === MAX_MISTAKES)
+    );
 }
 
 export function submitChoice(state, destination) {
   if (!isGameState(state) || state.status !== 'playing' || !VALID_DESTINATIONS.has(destination)) {
+    return state;
+  }
+  if (state.cursor >= state.tickets.length) {
     return state;
   }
 

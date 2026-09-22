@@ -73,3 +73,20 @@ test('invalid destinations and internally inconsistent states are rejected', () 
   assert.equal(isGameState({ ...state, tickets: [] }), false);
   assert.equal(isGameState({ ...state, score: -1 }), false);
 });
+
+test('terminal status relationships are required for a game state', () => {
+  const ready = createGame(11);
+  assert.equal(isGameState({ ...ready, status: 'playing', cursor: 18 }), false);
+  assert.equal(isGameState({ ...ready, status: 'playing', mistakes: 3 }), false);
+  assert.equal(isGameState({ ...ready, status: 'won', cursor: 17 }), false);
+  assert.equal(isGameState({ ...ready, status: 'won', cursor: 18, mistakes: 3 }), false);
+  assert.equal(isGameState({ ...ready, status: 'failed', mistakes: 2 }), false);
+  assert.equal(isGameState({ ...ready, status: 'failed', mistakes: 3 }), true);
+});
+
+test('a terminal-looking playing state is ignored instead of crashing on a missing ticket', () => {
+  const state = { ...createGame(12), status: 'playing', cursor: 18 };
+  assert.doesNotThrow(() => submitChoice(state, DESTINATIONS.REGULAR));
+  assert.equal(isGameState(state), false);
+  assert.equal(submitChoice(state, DESTINATIONS.REGULAR), state);
+});

@@ -104,3 +104,73 @@ exit_code=0
 - `package.json`
 - `src/game.js`
 - `tests/game.test.js`
+
+## Fix Round 1: 終端状態の意味検証と欠落票ガード
+
+### 指摘
+
+レビューで、`isGameState` が `{ status: 'playing', cursor: 18 }` を受理し、`submitChoice` が `tickets[18]` の `undefined` を分類して例外になる経路が確認された。`playing` / `won` / `failed` の終端状態関係を検証し、`submitChoice` にも `cursor >= tickets.length` の防御を追加した。
+
+### RED
+
+実装変更前に、次の回帰テストを追加して実行した。
+
+```text
+npm test -- --test-name-pattern="terminal status|terminal-looking"
+```
+
+結果は期待どおり2件失敗した。
+
+```text
+✖ terminal status relationships are required for a game state
+  AssertionError [ERR_ASSERTION]: true !== false
+✖ a terminal-looking playing state is ignored instead of crashing on a missing ticket
+  AssertionError [ERR_ASSERTION]: Got unwanted exception.
+  Actual message: "Cannot read properties of undefined (reading 'seal')"
+ℹ tests 2
+ℹ pass 0
+ℹ fail 2
+exit_code=1
+```
+
+### GREEN
+
+`isGameState` に次の意味関係を追加した。
+
+- `playing`: `cursor < 18` かつ `mistakes < 3`
+- `won`: `cursor === 18` かつ `mistakes < 3`
+- `failed`: `mistakes === 3`
+
+`submitChoice` は状態検証後にも `cursor >= tickets.length` を検査し、同じ参照を返す。
+
+回帰テストの再実行:
+
+```text
+npm test -- --test-name-pattern="terminal status|terminal-looking"
+✔ terminal status relationships are required for a game state
+✔ a terminal-looking playing state is ignored instead of crashing on a missing ticket
+ℹ tests 2
+ℹ pass 2
+ℹ fail 0
+exit_code=0
+```
+
+全テスト:
+
+```text
+npm test
+✔ same seed creates the same constrained 18-ticket shift
+✔ red seal wins over checkpoint district and heavy weight
+✔ checkpoint or heavy mail goes to review and the rest goes regular
+✔ correct answer advances and scores from the new streak
+✔ third mistake fails immediately and later input is ignored
+✔ eighteenth processed ticket wins and streak bonus is capped
+✔ invalid destinations and internally inconsistent states are rejected
+✔ terminal status relationships are required for a game state
+✔ a terminal-looking playing state is ignored instead of crashing on a missing ticket
+ℹ tests 9
+ℹ pass 9
+ℹ fail 0
+ℹ cancelled 0
+exit_code=0
+```
