@@ -97,6 +97,21 @@ test('network-first caches successful same-origin GET responses', async () => {
   ]]);
 });
 
+test('network-first returns a valid response when cache update fails', async () => {
+  const response = { ok: true, clone: () => 'cached-copy' };
+  const caches = {
+    open: async () => ({ put: async () => { throw new Error('quota exceeded'); } }),
+    match: async () => undefined
+  };
+  const { listeners } = await loadWorker({ caches, fetch: async () => response });
+  let returned;
+  listeners.get('fetch')({
+    request: { method: 'GET', url: 'https://example.test/moonlit-sorting-office/styles.css', mode: 'no-cors' },
+    respondWith: (promise) => { returned = promise; }
+  });
+  assert.equal(await returned, response);
+});
+
 test('same-origin navigation falls back to scoped index when network and request cache fail', async () => {
   const matches = [];
   const fallback = { body: 'index shell' };

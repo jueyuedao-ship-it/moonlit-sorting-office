@@ -78,6 +78,37 @@ http://127.0.0.1:4173/moonlit-sorting-office/
 
 直接のDevTools登録scope読み出しはこのin-app browserの評価APIでは提供されなかったが、相対登録 (`./sw.js`, `{ scope: './' }`)、相対manifest、nested pathでのoffline navigation fallbackとlocalStorage復元を、上記の実ブラウザ挙動で確認した。
 
+## Fix Round 1: cache.put failure isolation
+
+### RED
+
+レビュー指摘に対して、`tests/pwa.test.js` に次の回帰テストを先に追加した。
+
+```text
+test('network-first returns a valid response when cache update fails', ...)
+```
+
+`cache.put()` が `quota exceeded` でrejectし、`fetch()` は `ok: true` のResponseを返すVM fixtureで、実装変更前に次を実行した。
+
+```text
+npm test -- --test-name-pattern="cache update fails"
+✖ network-first returns a valid response when cache update fails
+  Error: Network request failed and no cached response is available
+```
+
+原因は、network-firstの成功Responseとcache更新Promiseを同じ外側の `.catch()` に接続していたため、cache書込失敗がネットワーク失敗として扱われていたことだった。
+
+### GREEN
+
+`sw.js` のcache更新だけに拒否吸収を置いた。
+
+```js
+.then((cache) => cache.put(request, response.clone()).catch(() => {}))
+.then(() => response)
+```
+
+ネットワーク自体のreject、cache miss、navigation fallbackの処理は変更していない。修正後の focused test は4/4 PASS（対象1件はPASS）し、最終フルスイートは30/30 PASS、fail 0だった。構文チェック、root-absolute-path scan、`git diff --check` もPASS。
+
 ## Self-review / concerns
 
 - app shellと実ファイル12項目は一致している。
