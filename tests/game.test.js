@@ -1,145 +1,291 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {
-  DESTINATIONS, createGame, classifyTicket, getCheckpointDistrict,
-  submitChoice, isGameState
-} from '../src/game.js';
+import * as engine from '../src/game.js';
 
-function startGame(seed) {
-  return { ...createGame(seed), status: 'playing' };
-}
+const {
+  GAME_VERSION,
+  GENERATOR_CATALOG,
+  UPGRADE_CATALOG,
+  advance,
+  buyGenerator,
+  buyUpgrade,
+  canPrestige,
+  click,
+  createGame,
+  getGeneratorCost,
+  getProduction,
+  isGameState,
+  isGeneratorUnlocked,
+  isUpgradeUnlocked,
+  prestige
+} = engine;
 
-function expectedDestination(state) {
-  return classifyTicket(state.tickets[state.cursor], getCheckpointDistrict(state.cursor)).destination;
-}
-
-function wrongDestination(state) {
-  const expected = expectedDestination(state);
-  return [DESTINATIONS.EXPRESS, DESTINATIONS.REVIEW, DESTINATIONS.REGULAR]
-    .find((destination) => destination !== expected);
-}
-
-function finishWon(seed) {
-  let state = startGame(seed);
-  while (state.status === 'playing') {
-    state = submitChoice(state, expectedDestination(state));
+function assertEngineApi() {
+  for (const name of [
+    'advance', 'buyGenerator', 'buyUpgrade', 'canPrestige', 'click', 'createGame',
+    'getGeneratorCost', 'getProduction', 'isGameState', 'isGeneratorUnlocked',
+    'isUpgradeUnlocked', 'prestige'
+  ]) {
+    assert.equal(typeof engine[name], 'function', `${name} must be exported by the game engine`);
   }
-  return state;
+  for (const name of ['GAME_VERSION', 'GENERATOR_CATALOG', 'MAX_OFFLINE_SECONDS', 'UPGRADE_CATALOG']) {
+    assert.ok(engine[name] !== undefined, `${name} must be exported by the game engine`);
+  }
 }
 
-function finishFailed(seed) {
-  let state = startGame(seed);
-  while (state.status === 'playing') {
-    state = submitChoice(state, wrongDestination(state));
-  }
-  return state;
+function gameTest(name, body) {
+  test(name, () => {
+    assertEngineApi();
+    body();
+  });
 }
 
-test('same seed creates the same constrained 18-ticket shift', () => {
-  const first = createGame(12345);
-  const second = createGame(12345);
-  assert.deepEqual(first.tickets, second.tickets);
-  assert.equal(first.tickets.length, 18);
-  for (let start = 0; start < 18; start += 6) {
-    const group = first.tickets.slice(start, start + 6);
-    const checkpoint = getCheckpointDistrict(start);
-    const outcomes = new Set(group.map((ticket) => classifyTicket(ticket, checkpoint).destination));
-    assert.deepEqual([...outcomes].sort(), ['express', 'regular', 'review']);
-  }
+function earnClicks(state, count) {
+  let next = state;
+  for (let index = 0; index < count; index += 1) next = click(next);
+  return next;
+}
+
+function withProgress(state, changes) {
+  const next = { ...state, ...changes };
+  assert.equal(isGameState(next), true, 'the fixture must be a valid save state');
+  return next;
+}
+
+gameTest('a fresh game starts at zero and the first click earns one moonlight', () => {
+  const state = createGame(1_000);
+  const next = click(state);
+
+  assert.equal(state.moonlight, 0);
+  assert.equal(next.moonlight, 1);
+  assert.equal(next.runMoonEarned, 1);
+  assert.equal(next.lastUpdatedAt, 1_000);
+  assert.equal(isGameState(next), true);
 });
 
-test('red seal wins over checkpoint district and heavy weight', () => {
-  const result = classifyTicket(
-    { id: 'x', seal: 'red', district: '月見町', weight: 'heavy' },
-    '月見町'
-  );
-  assert.deepEqual(result, { destination: DESTINATIONS.EXPRESS, reason: '赤印は最優先です' });
+gameTest('the next generator price rises by the documented 15 percent rule', () => {
+  let state = earnClicks(createGame(0), 15);
+  assert.equal(getGeneratorCost(state, 'lantern'), 15);
+
+  state = buyGenerator(state, 'lantern');
+  assert.equal(state.generators.lantern, 1);
+  assert.equal(getGeneratorCost(state, 'lantern'), 18);
+
+  state = earnClicks(state, 18);
+  state = buyGenerator(state, 'lantern');
+  assert.equal(state.generators.lantern, 2);
+  assert.equal(getGeneratorCost(state, 'lantern'), 20);
 });
 
-test('checkpoint or heavy mail goes to review and the rest goes regular', () => {
-  assert.equal(classifyTicket({ id: 'a', seal: 'blue', district: '星川', weight: 'light' }, '星川').destination, 'review');
-  assert.equal(classifyTicket({ id: 'b', seal: 'none', district: '港通り', weight: 'heavy' }, '星川').destination, 'review');
-  assert.equal(classifyTicket({ id: 'c', seal: 'blue', district: '港通り', weight: 'light' }, '星川').destination, 'regular');
+gameTest('an unaffordable or unknown generator purchase leaves the state unchanged', () => {
+  const state = createGame(0);
+  assert.equal(buyGenerator(state, 'lantern'), state);
+  assert.equal(buyGenerator(state, 'unknown'), state);
+  assert.equal(state.generators.lantern, 0);
+  assert.equal(getGeneratorCost(state, 'unknown'), null);
 });
 
-test('correct answer advances and scores from the new streak', () => {
-  const ready = createGame(7);
-  const playing = { ...ready, status: 'playing' };
-  const expected = classifyTicket(playing.tickets[0], getCheckpointDistrict(0));
-  const next = submitChoice(playing, expected.destination);
-  assert.equal(next.cursor, 1);
-  assert.equal(next.correct, 1);
-  assert.equal(next.streak, 1);
-  assert.equal(next.score, 110);
-  assert.equal(playing.cursor, 0);
-  assert.equal(next.lastFeedback.correct, true);
+gameTest('a lantern produces 0.2 moonlight per second and accrual counts as run earnings', () => {
+  let state = earnClicks(createGame(0), 15);
+  state = buyGenerator(state, 'lantern');
+
+  const next = advance(state, 5_000);
+  assert.equal(next.moonlight, 1);
+  assert.equal(next.runMoonEarned, 16);
+  assert.equal(getProduction(next).moonlightPerSecond, 0.2);
+  assert.equal(state.moonlight, 0);
 });
 
-test('third mistake fails immediately and later input is ignored', () => {
-  let state = startGame(8);
-  state = submitChoice(state, wrongDestination(state));
-  state = submitChoice(state, wrongDestination(state));
-  const expected = expectedDestination(state);
-  state = submitChoice(state, wrongDestination(state));
-  assert.equal(state.status, 'failed');
-  assert.equal(state.mistakes, 3);
-  assert.equal(submitChoice(state, expected), state);
+gameTest('generator cards unlock from run progress, including the star condenser at 5,000', () => {
+  const initial = createGame(0);
+  assert.equal(isGeneratorUnlocked(initial, 'lantern'), true);
+  assert.equal(isGeneratorUnlocked(initial, 'observatory'), false);
+  assert.equal(isGeneratorUnlocked(initial, 'starCondenser'), false);
+
+  const observatoryReady = withProgress(initial, { moonlight: 60, runMoonEarned: 60 });
+  assert.equal(isGeneratorUnlocked(observatoryReady, 'observatory'), true);
+
+  const justBeforeStars = withProgress(initial, { moonlight: 4_999, runMoonEarned: 4_999 });
+  const starsUnlocked = withProgress(initial, { moonlight: 5_000, runMoonEarned: 5_000 });
+  assert.equal(isGeneratorUnlocked(justBeforeStars, 'starCondenser'), false);
+  assert.equal(isGeneratorUnlocked(starsUnlocked, 'starCondenser'), true);
 });
 
-test('eighteenth processed ticket wins and streak bonus is capped', () => {
-  const state = finishWon(9);
-  assert.equal(state.status, 'won');
-  assert.equal(state.cursor, 18);
-  assert.equal(state.score, 3150);
-  assert.equal(state.bestStreak, 18);
+gameTest('the star condenser costs 10,000 moonlight and produces 0.05 stars per second', () => {
+  const funded = withProgress(createGame(0), { moonlight: 10_000, runMoonEarned: 10_000 });
+  assert.equal(getGeneratorCost(funded, 'starCondenser'), 10_000);
+
+  const bought = buyGenerator(funded, 'starCondenser');
+  assert.equal(bought.moonlight, 0);
+  assert.equal(bought.generators.starCondenser, 1);
+
+  const next = advance(bought, 20_000);
+  assert.equal(next.stars, 1);
+  assert.equal(next.runStarsEarned, 1);
+  assert.equal(getProduction(next).starsPerSecond, 0.05);
 });
 
-test('invalid destinations and internally inconsistent states are rejected', () => {
-  const state = { ...createGame(10), status: 'playing' };
-  assert.equal(submitChoice(state, 'unknown'), state);
+gameTest('moonlight upgrades unlock from progress and the click upgrade doubles the next click', () => {
+  let state = earnClicks(createGame(0), 25);
+  assert.equal(isUpgradeUnlocked(state, 'clickPower'), true);
+  assert.equal(state.moonlight, UPGRADE_CATALOG.clickPower.cost);
+
+  state = buyUpgrade(state, 'clickPower');
+  assert.equal(state.moonlight, 0);
+  assert.equal(state.upgrades.clickPower, true);
+
+  state = click(state);
+  assert.equal(state.moonlight, 2);
+  assert.equal(state.runMoonEarned, 27);
+});
+
+gameTest('the moonlight production upgrade doubles equipment production', () => {
+  let state = earnClicks(createGame(0), 195);
+  state = buyGenerator(state, 'lantern');
+  assert.equal(state.moonlight, 180);
+  assert.equal(getProduction(state).moonlightPerSecond, 0.2);
+
+  state = buyUpgrade(state, 'moonlightProduction');
+  assert.equal(state.moonlight, 0);
+  assert.equal(getProduction(state).moonlightPerSecond, 0.4);
+});
+
+gameTest('a 10-star blessing doubles moonlight equipment and spending stars preserves run progress', () => {
+  let state = withProgress(createGame(0), {
+    moonlight: 10_025,
+    runMoonEarned: 10_025
+  });
+  state = buyGenerator(state, 'lantern');
+  state = buyGenerator(state, 'starCondenser');
+  state = advance(state, 200_000);
+
+  assert.equal(state.stars, 10);
+  assert.equal(state.runStarsEarned, 10);
+  assert.equal(getProduction(state).moonlightPerSecond, 0.2);
+
+  state = buyUpgrade(state, 'starBlessing');
+  assert.equal(state.stars, 0);
+  assert.equal(state.runStarsEarned, 10);
+  assert.equal(getProduction(state).moonlightPerSecond, 0.4);
+});
+
+gameTest('prestige requires 100,000 run moonlight and 25 run stars, even after stars are spent', () => {
+  const initial = createGame(0);
+  const moonlightShort = withProgress(initial, {
+    moonlight: 99_999,
+    runMoonEarned: 99_999,
+    stars: 25,
+    runStarsEarned: 25
+  });
+  const starsShort = withProgress(initial, {
+    moonlight: 100_000,
+    runMoonEarned: 100_000,
+    stars: 0,
+    runStarsEarned: 24
+  });
+  const eligibleAfterSpending = withProgress(initial, {
+    moonlight: 100_000,
+    runMoonEarned: 100_000,
+    stars: 0,
+    runStarsEarned: 25
+  });
+
+  assert.equal(canPrestige(moonlightShort), false);
+  assert.equal(canPrestige(starsShort), false);
+  assert.equal(canPrestige(eligibleAfterSpending), true);
+  assert.equal(prestige(moonlightShort), moonlightShort);
+});
+
+gameTest('prestige resets the run, grants square-root memories, and applies the permanent multiplier', () => {
+  const initial = createGame(123);
+  const eligible = withProgress(initial, {
+    moonlight: 2_000,
+    stars: 30,
+    runMoonEarned: 400_000,
+    runStarsEarned: 40,
+    lifetime: { memories: 2, prestiges: 2 },
+    generators: { ...initial.generators, lantern: 2, observatory: 1, starCondenser: 1 },
+    upgrades: { ...initial.upgrades, clickPower: true, moonlightProduction: true, starBlessing: true }
+  });
+
+  const next = prestige(eligible);
+  assert.equal(next.moonlight, 0);
+  assert.equal(next.stars, 0);
+  assert.equal(next.runMoonEarned, 0);
+  assert.equal(next.runStarsEarned, 0);
+  assert.deepEqual(next.generators, {
+    lantern: 0,
+    observatory: 0,
+    moonring: 0,
+    garden: 0,
+    starCondenser: 0
+  });
+  assert.deepEqual(next.upgrades, { clickPower: false, moonlightProduction: false, starBlessing: false });
+  assert.deepEqual(next.lifetime, { memories: 4, prestiges: 3 });
+  assert.equal(getProduction(next).permanentMultiplier, 2);
+  assert.equal(click(next).moonlight, 2);
+  assert.equal(eligible.moonlight, 2_000);
+});
+
+gameTest('offline accrual is capped at eight hours and the same timestamp cannot pay twice', () => {
+  let state = earnClicks(createGame(0), 15);
+  state = buyGenerator(state, 'lantern');
+
+  const resumedAt = 8 * 60 * 60 * 1_000 + 10_000;
+  state = advance(state, resumedAt);
+  assert.equal(state.moonlight, 5_760);
+  assert.equal(state.lastUpdatedAt, resumedAt);
+
+  const repeated = advance(state, resumedAt);
+  assert.equal(repeated, state);
+});
+
+gameTest('time going backwards and invalid timestamps do not mutate a game', () => {
+  const state = createGame(5_000);
+  assert.equal(advance(state, 4_000), state);
+  assert.equal(advance(state, Number.NaN), state);
+  assert.equal(advance(state, Number.POSITIVE_INFINITY), state);
+});
+
+gameTest('game state validation rejects non-finite resources and malformed save fields', () => {
+  const state = createGame(0);
   assert.equal(isGameState(state), true);
-  assert.equal(isGameState({ ...state, cursor: 19 }), false);
-  assert.equal(isGameState({ ...state, tickets: [] }), false);
-  assert.equal(isGameState({ ...state, score: -1 }), false);
+  assert.equal(isGameState({ ...state, moonlight: Number.NaN }), false);
+  assert.equal(isGameState({ ...state, stars: -1 }), false);
+  assert.equal(isGameState({ ...state, runMoonEarned: Number.POSITIVE_INFINITY }), false);
+  assert.equal(isGameState({ ...state, version: GAME_VERSION + 1 }), false);
+  assert.equal(isGameState({ ...state, generators: { ...state.generators, lantern: 0.5 } }), false);
+  assert.equal(isGameState({ ...state, upgrades: { ...state.upgrades, clickPower: 1 } }), false);
 });
 
-test('terminal status relationships are required for a game state', () => {
-  const won = finishWon(11);
-  const failed = finishFailed(12);
-  assert.equal(isGameState({ ...won, cursor: 17 }), false);
-  assert.equal(isGameState({ ...won, mistakes: 3 }), false);
-  assert.equal(isGameState({ ...failed, mistakes: 2 }), false);
-  assert.equal(isGameState(won), true);
-  assert.equal(isGameState(failed), true);
+gameTest('invalid states are rejected by every transition without mutation', () => {
+  const invalid = { ...createGame(0), moonlight: Number.NaN };
+  assert.equal(click(invalid), invalid);
+  assert.equal(buyGenerator(invalid, 'lantern'), invalid);
+  assert.equal(buyUpgrade(invalid, 'clickPower'), invalid);
+  assert.equal(advance(invalid, 1_000), invalid);
+  assert.equal(prestige(invalid), invalid);
+  assert.equal(isGeneratorUnlocked(invalid, 'lantern'), false);
+  assert.equal(isUpgradeUnlocked(invalid, 'clickPower'), false);
 });
 
-test('a terminal-looking playing state is ignored instead of crashing on a missing ticket', () => {
-  const state = { ...createGame(13), status: 'playing', cursor: 18 };
-  assert.doesNotThrow(() => submitChoice(state, DESTINATIONS.REGULAR));
-  assert.equal(isGameState(state), false);
-  assert.equal(submitChoice(state, DESTINATIONS.REGULAR), state);
-});
-
-test('game state cursor is exactly the sum of correct answers and mistakes', () => {
-  const playing = startGame(14);
-  assert.equal(isGameState({ ...playing, cursor: 1 }), false);
-  assert.equal(isGameState({ ...playing, cursor: 1, mistakes: 1 }), true);
-  assert.equal(isGameState({ ...playing, cursor: 1, correct: 1 }), true);
-});
-
-test('ready state has no counters, score, or feedback', () => {
-  const ready = createGame(15);
-  assert.equal(isGameState(ready), true);
-  assert.equal(isGameState({ ...ready, score: 1 }), false);
-  assert.equal(isGameState({ ...ready, mistakes: 1 }), false);
-  assert.equal(isGameState({ ...ready, streak: 1 }), false);
-  assert.equal(isGameState({ ...ready, bestStreak: 1 }), false);
-  assert.equal(isGameState({ ...ready, correct: 1 }), false);
-  assert.equal(isGameState({ ...ready, lastFeedback: { correct: true, chosen: 'regular', expected: 'regular', reason: 'ok' } }), false);
-});
-
-test('best streak cannot exceed correct answers and streak cannot exceed best streak', () => {
-  const playing = startGame(16);
-  assert.equal(isGameState({ ...playing, bestStreak: 1 }), false);
-  assert.equal(isGameState({ ...playing, streak: 1, bestStreak: 0 }), false);
+gameTest('catalogs expose all four moonlight generators and the second-resource generator', () => {
+  assert.deepEqual(
+    Object.fromEntries(Object.entries(GENERATOR_CATALOG).map(([id, generator]) => [id, {
+      baseCost: generator.baseCost,
+      outputResource: generator.outputResource,
+      productionPerSecond: generator.productionPerSecond
+    }])),
+    {
+      lantern: { baseCost: 15, outputResource: 'moonlight', productionPerSecond: 0.2 },
+      observatory: { baseCost: 180, outputResource: 'moonlight', productionPerSecond: 2.5 },
+      moonring: { baseCost: 2_400, outputResource: 'moonlight', productionPerSecond: 30 },
+      garden: { baseCost: 36_000, outputResource: 'moonlight', productionPerSecond: 400 },
+      starCondenser: { baseCost: 10_000, outputResource: 'stars', productionPerSecond: 0.05 }
+    }
+  );
+  assert.deepEqual(Object.keys(UPGRADE_CATALOG), [
+    'clickPower', 'moonlightProduction', 'starBlessing'
+  ]);
+  assert.equal(GAME_VERSION, 1);
 });

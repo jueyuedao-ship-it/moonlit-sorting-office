@@ -1,206 +1,290 @@
-export const DESTINATIONS = Object.freeze({
-  EXPRESS: 'express',
-  REVIEW: 'review',
-  REGULAR: 'regular'
+export const GAME_VERSION = 1;
+export const MAX_OFFLINE_SECONDS = 8 * 60 * 60;
+const GENERATOR_PRICE_GROWTH = 1.15;
+
+const unlockByMoonlight = (value) => Object.freeze({ resource: 'runMoonEarned', value });
+const unlockByStars = (value) => Object.freeze({ resource: 'runStarsEarned', value });
+
+export const GENERATOR_CATALOG = Object.freeze({
+  lantern: Object.freeze({
+    id: 'lantern',
+    name: 'ランタン',
+    currency: 'moonlight',
+    baseCost: 15,
+    costGrowth: GENERATOR_PRICE_GROWTH,
+    outputResource: 'moonlight',
+    productionPerSecond: 0.2,
+    unlockAt: unlockByMoonlight(0),
+    description: '月光をゆっくり集めます'
+  }),
+  observatory: Object.freeze({
+    id: 'observatory',
+    name: '観測机',
+    currency: 'moonlight',
+    baseCost: 180,
+    costGrowth: GENERATOR_PRICE_GROWTH,
+    outputResource: 'moonlight',
+    productionPerSecond: 2.5,
+    unlockAt: unlockByMoonlight(60),
+    description: '月光の流れを観測します'
+  }),
+  moonring: Object.freeze({
+    id: 'moonring',
+    name: '月輪塔',
+    currency: 'moonlight',
+    baseCost: 2_400,
+    costGrowth: GENERATOR_PRICE_GROWTH,
+    outputResource: 'moonlight',
+    productionPerSecond: 30,
+    unlockAt: unlockByMoonlight(750),
+    description: '塔に月光を巡らせます'
+  }),
+  garden: Object.freeze({
+    id: 'garden',
+    name: '夜空庭園',
+    currency: 'moonlight',
+    baseCost: 36_000,
+    costGrowth: GENERATOR_PRICE_GROWTH,
+    outputResource: 'moonlight',
+    productionPerSecond: 400,
+    unlockAt: unlockByMoonlight(9_000),
+    description: '夜空から月光を育てます'
+  }),
+  starCondenser: Object.freeze({
+    id: 'starCondenser',
+    name: '星屑凝縮器',
+    currency: 'moonlight',
+    baseCost: 10_000,
+    costGrowth: GENERATOR_PRICE_GROWTH,
+    outputResource: 'stars',
+    productionPerSecond: 0.05,
+    unlockAt: unlockByMoonlight(5_000),
+    description: '月光から星屑を集めます'
+  })
 });
 
-export const DISTRICTS = Object.freeze(['月見町', '星川', '霧ヶ丘', '港通り']);
-export const SHIFT_SIZE = 18;
-export const MAX_MISTAKES = 3;
+export const UPGRADE_CATALOG = Object.freeze({
+  clickPower: Object.freeze({
+    id: 'clickPower',
+    name: '月光の手ほどき',
+    currency: 'moonlight',
+    cost: 25,
+    unlockAt: unlockByMoonlight(15),
+    clickMultiplier: 2,
+    description: 'クリックで得る月光が2倍になります'
+  }),
+  moonlightProduction: Object.freeze({
+    id: 'moonlightProduction',
+    name: '月光の調律',
+    currency: 'moonlight',
+    cost: 180,
+    unlockAt: unlockByMoonlight(60),
+    moonlightProductionMultiplier: 2,
+    description: '月光設備の生産が2倍になります'
+  }),
+  starBlessing: Object.freeze({
+    id: 'starBlessing',
+    name: '星屑の祝福',
+    currency: 'stars',
+    cost: 10,
+    unlockAt: unlockByStars(10),
+    moonlightProductionMultiplier: 2,
+    description: '星屑10個で月光設備の生産が2倍になります'
+  })
+});
 
-const VERSION = 1;
-const GROUP_SIZE = 6;
-const CHECKPOINTS = Object.freeze(['月見町', '霧ヶ丘', '港通り']);
-const SEALS = Object.freeze(['red', 'blue', 'none']);
-const WEIGHTS = Object.freeze(['light', 'heavy']);
-const VALID_STATUSES = new Set(['ready', 'playing', 'won', 'failed']);
-const VALID_DESTINATIONS = new Set(Object.values(DESTINATIONS));
+const GENERATOR_IDS = Object.freeze(Object.keys(GENERATOR_CATALOG));
+const UPGRADE_IDS = Object.freeze(Object.keys(UPGRADE_CATALOG));
+const RUN_PRESTIGE_MOONLIGHT = 100_000;
+const RUN_PRESTIGE_STARS = 25;
+const MAX_STORED_RESOURCE = Number.MAX_VALUE;
 
-function createRandom(seed) {
-  let state = seed >>> 0;
-  return () => {
-    state = (state + 0x6d2b79f5) | 0;
-    let value = Math.imul(state ^ (state >>> 15), 1 | state);
-    value ^= value + Math.imul(value ^ (value >>> 7), 61 | value);
-    return ((value ^ (value >>> 14)) >>> 0) / 4294967296;
-  };
+function isRecord(value) {
+  return value !== null && typeof value === 'object' && !Array.isArray(value);
 }
 
-function pick(random, values) {
-  return values[Math.floor(random() * values.length)];
+function hasExactKeys(value, keys) {
+  return isRecord(value)
+    && Object.keys(value).length === keys.length
+    && keys.every((key) => Object.hasOwn(value, key));
 }
 
-function shuffle(random, values) {
-  for (let index = values.length - 1; index > 0; index -= 1) {
-    const swapIndex = Math.floor(random() * (index + 1));
-    [values[index], values[swapIndex]] = [values[swapIndex], values[index]];
-  }
-  return values;
+function finiteNonnegative(value) {
+  return Number.isFinite(value) && value >= 0;
 }
 
-function ticket(id, seal, district, weight) {
-  return { id, seal, district, weight };
-}
-
-function createGroup(random, groupIndex) {
-  const checkpoint = CHECKPOINTS[groupIndex];
-  const alternateDistricts = DISTRICTS.filter((district) => district !== checkpoint);
-  const otherDistrict = alternateDistricts[groupIndex % alternateDistricts.length];
-  const regularDistrict = alternateDistricts[(groupIndex + 1) % alternateDistricts.length];
-
-  return shuffle(random, [
-    ticket('', 'red', otherDistrict, 'light'),
-    ticket('', 'blue', checkpoint, 'light'),
-    ticket('', 'none', regularDistrict, 'heavy'),
-    ticket('', 'blue', otherDistrict, 'light'),
-    ticket('', pick(random, SEALS), pick(random, DISTRICTS), pick(random, WEIGHTS)),
-    ticket('', pick(random, SEALS), pick(random, DISTRICTS), pick(random, WEIGHTS))
-  ]);
-}
-
-function createTickets(seed) {
-  const random = createRandom(seed);
-  const tickets = [];
-  for (let groupIndex = 0; groupIndex < SHIFT_SIZE / GROUP_SIZE; groupIndex += 1) {
-    tickets.push(...createGroup(random, groupIndex));
-  }
-  return tickets.map((value, index) => ({ ...value, id: `ticket-${String(index + 1).padStart(2, '0')}` }));
-}
-
-export function getCheckpointDistrict(cursor) {
-  return CHECKPOINTS[Math.min(2, Math.floor(Math.max(0, cursor) / GROUP_SIZE))];
-}
-
-export function classifyTicket(ticketToClassify, checkpointDistrict) {
-  if (ticketToClassify.seal === 'red') {
-    return { destination: DESTINATIONS.EXPRESS, reason: '赤印は最優先です' };
-  }
-  if (ticketToClassify.district === checkpointDistrict) {
-    return { destination: DESTINATIONS.REVIEW, reason: `${checkpointDistrict}は現在の要確認地区です` };
-  }
-  if (ticketToClassify.weight === 'heavy') {
-    return { destination: DESTINATIONS.REVIEW, reason: '重量郵便は確認が必要です' };
-  }
-  return { destination: DESTINATIONS.REGULAR, reason: '特急・確認条件に該当しません' };
-}
-
-export function createGame(seed) {
-  const normalizedSeed = Number.isInteger(seed) ? (seed >>> 0) : 0;
+function freshRun(now) {
   return {
-    version: VERSION,
-    seed: normalizedSeed,
-    status: 'ready',
-    tickets: createTickets(normalizedSeed),
-    cursor: 0,
-    score: 0,
-    mistakes: 0,
-    streak: 0,
-    bestStreak: 0,
-    correct: 0,
-    lastFeedback: null
+    version: GAME_VERSION,
+    moonlight: 0,
+    stars: 0,
+    runMoonEarned: 0,
+    runStarsEarned: 0,
+    lifetime: { memories: 0, prestiges: 0 },
+    generators: Object.fromEntries(GENERATOR_IDS.map((id) => [id, 0])),
+    upgrades: Object.fromEntries(UPGRADE_IDS.map((id) => [id, false])),
+    lastUpdatedAt: now
   };
 }
 
-function isIntegerInRange(value, minimum = 0, maximum = Number.MAX_SAFE_INTEGER) {
-  return Number.isInteger(value) && value >= minimum && value <= maximum;
-}
-
-function isTicket(value, index) {
-  return value !== null
-    && typeof value === 'object'
-    && value.id === `ticket-${String(index + 1).padStart(2, '0')}`
-    && SEALS.includes(value.seal)
-    && DISTRICTS.includes(value.district)
-    && WEIGHTS.includes(value.weight);
-}
-
-function isFeedback(value) {
-  return value === null || (
-    value !== null
-    && typeof value === 'object'
-    && typeof value.correct === 'boolean'
-    && typeof value.chosen === 'string'
-    && VALID_DESTINATIONS.has(value.chosen)
-    && typeof value.expected === 'string'
-    && VALID_DESTINATIONS.has(value.expected)
-    && typeof value.reason === 'string'
-  );
+export function createGame(now = Date.now()) {
+  const timestamp = Number.isFinite(now) ? now : Date.now();
+  return freshRun(timestamp);
 }
 
 export function isGameState(value) {
-  return value !== null
-    && typeof value === 'object'
-    && value.version === VERSION
-    && VALID_STATUSES.has(value.status)
-    && isIntegerInRange(value.seed, 0, 0xffffffff)
-    && Array.isArray(value.tickets)
-    && value.tickets.length === SHIFT_SIZE
-    && value.tickets.every(isTicket)
-    && isIntegerInRange(value.cursor, 0, SHIFT_SIZE)
-    && isIntegerInRange(value.score)
-    && isIntegerInRange(value.mistakes, 0, MAX_MISTAKES)
-    && isIntegerInRange(value.streak)
-    && isIntegerInRange(value.bestStreak)
-    && value.cursor === value.correct + value.mistakes
-    && value.bestStreak <= value.correct
-    && value.bestStreak >= value.streak
-    && isIntegerInRange(value.correct, 0, SHIFT_SIZE)
-    && value.correct <= value.cursor
-    && isFeedback(value.lastFeedback)
-    && (
-      value.status !== 'ready'
-      || (
-        value.cursor === 0
-        && value.score === 0
-        && value.mistakes === 0
-        && value.streak === 0
-        && value.bestStreak === 0
-        && value.correct === 0
-        && value.lastFeedback === null
-      )
-    )
-    && (
-      value.status === 'ready'
-      || (value.status === 'playing' && value.cursor < SHIFT_SIZE && value.mistakes < MAX_MISTAKES)
-      || (value.status === 'won' && value.cursor === SHIFT_SIZE && value.mistakes < MAX_MISTAKES)
-      || (value.status === 'failed' && value.mistakes === MAX_MISTAKES)
-    );
+  if (!hasExactKeys(value, [
+    'version', 'moonlight', 'stars', 'runMoonEarned', 'runStarsEarned',
+    'lifetime', 'generators', 'upgrades', 'lastUpdatedAt'
+  ])) return false;
+
+  return value.version === GAME_VERSION
+    && finiteNonnegative(value.moonlight)
+    && finiteNonnegative(value.stars)
+    && finiteNonnegative(value.runMoonEarned)
+    && finiteNonnegative(value.runStarsEarned)
+    && value.moonlight <= value.runMoonEarned
+    && value.stars <= value.runStarsEarned
+    && Number.isFinite(value.lastUpdatedAt)
+    && hasExactKeys(value.lifetime, ['memories', 'prestiges'])
+    && Number.isSafeInteger(value.lifetime.memories)
+    && value.lifetime.memories >= 0
+    && Number.isSafeInteger(value.lifetime.prestiges)
+    && value.lifetime.prestiges >= 0
+    && value.lifetime.memories >= value.lifetime.prestiges
+    && hasExactKeys(value.generators, GENERATOR_IDS)
+    && GENERATOR_IDS.every((id) => Number.isSafeInteger(value.generators[id]) && value.generators[id] >= 0)
+    && hasExactKeys(value.upgrades, UPGRADE_IDS)
+    && UPGRADE_IDS.every((id) => typeof value.upgrades[id] === 'boolean');
 }
 
-export function submitChoice(state, destination) {
-  if (!isGameState(state) || state.status !== 'playing' || !VALID_DESTINATIONS.has(destination)) {
-    return state;
+function getUnlockValue(state, rule) {
+  if (rule.resource === 'runMoonEarned' || rule.resource === 'runStarsEarned') {
+    return state[rule.resource];
   }
-  if (state.cursor >= state.tickets.length) {
-    return state;
+  return -1;
+}
+
+function meetsUnlock(state, rule) {
+  return isRecord(rule)
+    && typeof rule.resource === 'string'
+    && finiteNonnegative(rule.value)
+    && getUnlockValue(state, rule) >= rule.value;
+}
+
+export function isGeneratorUnlocked(state, id) {
+  const generator = GENERATOR_CATALOG[id];
+  return isGameState(state) && generator !== undefined && meetsUnlock(state, generator.unlockAt);
+}
+
+export function isUpgradeUnlocked(state, id) {
+  const upgrade = UPGRADE_CATALOG[id];
+  return isGameState(state) && upgrade !== undefined && meetsUnlock(state, upgrade.unlockAt);
+}
+
+export function getGeneratorCost(state, id) {
+  const generator = GENERATOR_CATALOG[id];
+  if (!isGameState(state) || generator === undefined) return null;
+
+  const rawCost = generator.baseCost * (generator.costGrowth ** state.generators[id]);
+  if (!Number.isFinite(rawCost)) return MAX_STORED_RESOURCE;
+  return Math.ceil(rawCost);
+}
+
+function getPermanentMultiplier(state) {
+  return 1 + (0.25 * state.lifetime.memories);
+}
+
+export function getProduction(state) {
+  if (!isGameState(state)) {
+    return { moonlightPerSecond: 0, starsPerSecond: 0, clickAmount: 0, permanentMultiplier: 1 };
   }
 
-  const ticketToClassify = state.tickets[state.cursor];
-  const result = classifyTicket(ticketToClassify, getCheckpointDistrict(state.cursor));
-  const correct = destination === result.destination;
-  const nextStreak = correct ? state.streak + 1 : 0;
-  const nextMistakes = correct ? state.mistakes : state.mistakes + 1;
-  const nextCursor = state.cursor + 1;
-  const nextStatus = !correct && nextMistakes >= MAX_MISTAKES
-    ? 'failed'
-    : nextCursor >= SHIFT_SIZE
-      ? 'won'
-      : 'playing';
+  const permanentMultiplier = getPermanentMultiplier(state);
+  let baseMoonlight = 0;
+  for (const id of GENERATOR_IDS) {
+    const generator = GENERATOR_CATALOG[id];
+    if (generator.outputResource === 'moonlight') {
+      baseMoonlight += state.generators[id] * generator.productionPerSecond;
+    }
+  }
+
+  const upgradeMultiplier = (state.upgrades.moonlightProduction ? 2 : 1)
+    * (state.upgrades.starBlessing ? 2 : 1);
+  return {
+    moonlightPerSecond: baseMoonlight * upgradeMultiplier * permanentMultiplier,
+    starsPerSecond: state.generators.starCondenser * GENERATOR_CATALOG.starCondenser.productionPerSecond,
+    clickAmount: (state.upgrades.clickPower ? UPGRADE_CATALOG.clickPower.clickMultiplier : 1)
+      * permanentMultiplier,
+    permanentMultiplier
+  };
+}
+
+export function click(state) {
+  if (!isGameState(state)) return state;
+  const gain = getProduction(state).clickAmount;
+  const moonlight = state.moonlight + gain;
+  const runMoonEarned = state.runMoonEarned + gain;
+  if (!finiteNonnegative(moonlight) || !finiteNonnegative(runMoonEarned)) return state;
+  return { ...state, moonlight, runMoonEarned };
+}
+
+export function buyGenerator(state, id) {
+  if (!isGameState(state) || !isGeneratorUnlocked(state, id)) return state;
+  const generator = GENERATOR_CATALOG[id];
+  const cost = getGeneratorCost(state, id);
+  if (cost === null || state[generator.currency] < cost) return state;
 
   return {
     ...state,
-    status: nextStatus,
-    cursor: nextCursor,
-    score: correct ? state.score + 100 + Math.min(nextStreak * 10, 100) : state.score,
-    mistakes: nextMistakes,
-    streak: nextStreak,
-    bestStreak: Math.max(state.bestStreak, nextStreak),
-    correct: state.correct + (correct ? 1 : 0),
-    lastFeedback: {
-      correct,
-      chosen: destination,
-      expected: result.destination,
-      reason: result.reason
-    }
+    [generator.currency]: state[generator.currency] - cost,
+    generators: { ...state.generators, [id]: state.generators[id] + 1 }
+  };
+}
+
+export function buyUpgrade(state, id) {
+  if (!isGameState(state) || !isUpgradeUnlocked(state, id)) return state;
+  const upgrade = UPGRADE_CATALOG[id];
+  if (state.upgrades[id] || state[upgrade.currency] < upgrade.cost) return state;
+
+  return {
+    ...state,
+    [upgrade.currency]: state[upgrade.currency] - upgrade.cost,
+    upgrades: { ...state.upgrades, [id]: true }
+  };
+}
+
+export function advance(state, now) {
+  if (!isGameState(state) || !Number.isFinite(now) || now <= state.lastUpdatedAt) return state;
+
+  const elapsedSeconds = Math.min((now - state.lastUpdatedAt) / 1_000, MAX_OFFLINE_SECONDS);
+  const production = getProduction(state);
+  const moonlightGain = production.moonlightPerSecond * elapsedSeconds;
+  const starGain = production.starsPerSecond * elapsedSeconds;
+  const moonlight = state.moonlight + moonlightGain;
+  const stars = state.stars + starGain;
+  const runMoonEarned = state.runMoonEarned + moonlightGain;
+  const runStarsEarned = state.runStarsEarned + starGain;
+  if (![moonlight, stars, runMoonEarned, runStarsEarned].every(finiteNonnegative)) return state;
+
+  return { ...state, moonlight, stars, runMoonEarned, runStarsEarned, lastUpdatedAt: now };
+}
+
+export function canPrestige(state) {
+  return isGameState(state)
+    && state.runMoonEarned >= RUN_PRESTIGE_MOONLIGHT
+    && state.runStarsEarned >= RUN_PRESTIGE_STARS;
+}
+
+export function prestige(state) {
+  if (!canPrestige(state)) return state;
+  const memoriesGained = Math.max(1, Math.floor(Math.sqrt(state.runMoonEarned / RUN_PRESTIGE_MOONLIGHT)));
+  const memories = state.lifetime.memories + memoriesGained;
+  const prestiges = state.lifetime.prestiges + 1;
+  if (!Number.isSafeInteger(memories) || !Number.isSafeInteger(prestiges)) return state;
+
+  return {
+    ...freshRun(state.lastUpdatedAt),
+    lifetime: { memories, prestiges }
   };
 }
