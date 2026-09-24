@@ -76,6 +76,21 @@ test('production, affordability, and upgrade ownership are presented from game s
   assert.equal(view.upgrades.moonlightProduction.purchased, true);
 });
 
+test('generator production text includes the active upgrade and permanent multipliers', () => {
+  const initial = createGame(0);
+  const state = gameWith({
+    moonlight: 200,
+    runMoonEarned: 200,
+    lifetime: { memories: 4, prestiges: 2 },
+    generators: { ...initial.generators, lantern: 1 },
+    upgrades: { ...initial.upgrades, moonlightProduction: true }
+  });
+  const view = toViewModel(state);
+
+  assert.equal(view.generators.lantern.productionPerSecond, 0.8);
+  assert.equal(view.generators.lantern.productionText, '+0.8 月光/秒');
+});
+
 test('prestige preview explains reset and shows memory gain and next permanent multiplier', () => {
   const state = gameWith({
     moonlight: 250_000,

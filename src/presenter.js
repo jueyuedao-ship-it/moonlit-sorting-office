@@ -45,12 +45,21 @@ function resourceView(amount, label) {
   return { amount, text: formatNumber(amount), label };
 }
 
-function presentGenerator(state, [id, generator]) {
+function generatorProductionPerSecond(state, generator, production) {
+  if (generator.outputResource !== 'moonlight') return generator.productionPerSecond;
+
+  const upgradeMultiplier = (state.upgrades.moonlightProduction ? 2 : 1)
+    * (state.upgrades.starBlessing ? 2 : 1);
+  return generator.productionPerSecond * upgradeMultiplier * production.permanentMultiplier;
+}
+
+function presentGenerator(state, [id, generator], production) {
   const cost = getGeneratorCost(state, id);
   const visible = isGeneratorUnlocked(state, id);
   const affordable = state[generator.currency] >= cost;
   const outputLabel = RESOURCE_LABELS[generator.outputResource];
   const currencyLabel = RESOURCE_LABELS[generator.currency];
+  const productionPerSecond = generatorProductionPerSecond(state, generator, production);
 
   return {
     id,
@@ -61,8 +70,8 @@ function presentGenerator(state, [id, generator]) {
     owned: state.generators[id],
     cost,
     costText: `${formatNumber(cost)} ${currencyLabel}`,
-    productionPerSecond: generator.productionPerSecond,
-    productionText: `+${formatNumber(generator.productionPerSecond)} ${outputLabel}/秒`,
+    productionPerSecond,
+    productionText: `+${formatNumber(productionPerSecond)} ${outputLabel}/秒`,
     visible,
     affordable,
     buyDisabled: !visible || !affordable
@@ -141,7 +150,7 @@ export function toViewModel(game) {
       permanentMultiplierText: `${formatNumber(production.permanentMultiplier)}倍`
     },
     generators: Object.fromEntries(
-      Object.entries(GENERATOR_CATALOG).map((entry) => [entry[0], presentGenerator(state, entry)])
+      Object.entries(GENERATOR_CATALOG).map((entry) => [entry[0], presentGenerator(state, entry, production)])
     ),
     upgrades: Object.fromEntries(
       Object.entries(UPGRADE_CATALOG).map((entry) => [entry[0], presentUpgrade(state, entry)])

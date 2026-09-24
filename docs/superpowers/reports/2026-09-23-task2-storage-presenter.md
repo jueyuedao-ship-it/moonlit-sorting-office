@@ -27,7 +27,7 @@ node --test tests/storage.test.js tests/presenter.test.js
 13 passed, 0 failed
 ```
 
-## 最終確認
+## 初回実装の確認
 
 ```text
 npm test
@@ -43,3 +43,24 @@ formatter の日本語単位ラベルを修正した後にも対象テストと�
 - 表示モデルは Task 1 のカタログと計算関数から設備費・生産・解放条件を導出し、買えない設備を無効化する情報も返す。
 - 転生プレビューはゲームエンジンと同じ月光・星屑の条件と記憶獲得式を表示し、リセット対象と次の恒久倍率を含む。
 - 実ブラウザーでのUI操作・永続化確認は Task 3/5 の統合範囲で、このTaskでは行っていない。
+
+## 独立レビュー修正
+
+独立レビューで、設備カードの生産表示がカタログの基礎値のままで、強化と恒久倍率による実際の1台あたりの増分を反映しない問題が見つかった。まず倍率状態の回帰テストを追加し、修正前に実行した。
+
+```text
+node --test tests/presenter.test.js
+7 passed, 1 failed — expected 0.8, received 0.2
+```
+
+表示モデルの設備 `productionPerSecond` と `productionText` を、月光設備なら月光生産強化・星屑祝福・恒久倍率を反映した1台あたりの実増分に変更した。星屑凝縮器はゲームエンジンどおり恒久倍率の対象外としている。
+
+修正後の確認:
+
+```text
+node --test tests/presenter.test.js
+8 passed, 0 failed
+
+npm test
+44 passed, 0 failed
+```
