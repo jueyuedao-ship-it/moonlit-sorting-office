@@ -85,6 +85,20 @@ gameTest('an unaffordable or unknown generator purchase leaves the state unchang
   assert.equal(getGeneratorCost(state, 'unknown'), null);
 });
 
+gameTest('buying a generator at the maximum safe count leaves the valid state unchanged', () => {
+  const state = withProgress(createGame(0), {
+    moonlight: Number.MAX_VALUE,
+    runMoonEarned: Number.MAX_VALUE,
+    generators: { ...createGame(0).generators, lantern: Number.MAX_SAFE_INTEGER }
+  });
+
+  assert.equal(getGeneratorCost(state, 'lantern'), Number.MAX_VALUE);
+  assert.equal(buyGenerator(state, 'lantern'), state);
+  assert.equal(state.generators.lantern, Number.MAX_SAFE_INTEGER);
+  assert.equal(state.moonlight, Number.MAX_VALUE);
+  assert.equal(isGameState(state), true);
+});
+
 gameTest('a lantern produces 0.2 moonlight per second and accrual counts as run earnings', () => {
   let state = earnClicks(createGame(0), 15);
   state = buyGenerator(state, 'lantern');

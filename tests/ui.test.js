@@ -180,6 +180,78 @@ test('large collection control earns moonlight, unlocks lantern purchase, and pe
   app.destroy();
 });
 
+test('collection clicks stay quiet in the live region while upgrade purchases are announced', () => {
+  const now = Date.now();
+  const initialGame = {
+    ...createGame(now),
+    moonlight: 25,
+    runMoonEarned: 25
+  };
+  const { app, documentRef, storage } = mountHarness({ clock: { value: now }, initialGame });
+  const collect = documentRef.getElementById('collect-button');
+  const activity = documentRef.getElementById('activity-status');
+
+  collect.click();
+  collect.click();
+  collect.click();
+  assert.equal(activity.textContent, '');
+
+  const clickUpgrade = findAction(documentRef.getElementById('upgrade-list'), 'buy-upgrade', 'clickPower');
+  assert.ok(clickUpgrade);
+  assert.equal(clickUpgrade.disabled, false);
+  clickUpgrade.click();
+
+  assert.equal(app.getState().upgrades.clickPower, true);
+  assert.equal(app.getState().moonlight, 3);
+  assert.match(activity.textContent, /購入しました/);
+  assert.equal(JSON.parse(storage.getItem(STORAGE_KEY)).game.upgrades.clickPower, true);
+  app.destroy();
+});
+
+test('star condenser UI blocks an unaffordable purchase and persists a funded purchase', () => {
+  const now = Date.now();
+  const initialGame = {
+    ...createGame(now),
+    moonlight: 9_999,
+    runMoonEarned: 9_999
+  };
+  const clock = { value: now };
+  const { app, documentRef, storage, intervals } = mountHarness({ clock, initialGame });
+  const condenser = findAction(documentRef.getElementById('star-generator-list'), 'buy-generator', 'starCondenser');
+
+  assert.ok(condenser);
+  assert.equal(condenser.disabled, true);
+  condenser.click();
+  assert.equal(app.getState().generators.starCondenser, 0);
+  assert.equal(app.getState().moonlight, 9_999);
+
+  documentRef.getElementById('collect-button').click();
+  assert.equal(condenser.disabled, false);
+  condenser.click();
+  assert.equal(app.getState().generators.starCondenser, 1);
+  assert.equal(app.getState().moonlight, 0);
+  assert.match(documentRef.getElementById('activity-status').textContent, /購入しました/);
+  assert.equal(JSON.parse(storage.getItem(STORAGE_KEY)).game.generators.starCondenser, 1);
+
+  clock.value += 20_000;
+  intervals[0].callback();
+  assert.equal(app.getState().stars, 1);
+  assert.equal(JSON.parse(storage.getItem(STORAGE_KEY)).game.stars, 1);
+  app.destroy();
+});
+
+test('an invalid in-memory save never reports that it was saved', () => {
+  const clock = { value: Date.now() };
+  const { app, documentRef, intervals } = mountHarness({ clock });
+
+  app.getState().moonlight = -1;
+  clock.value += 10_000;
+  intervals[0].callback();
+
+  assert.equal(documentRef.getElementById('save-status').textContent, '保存データに問題があり、保存できません');
+  app.destroy();
+});
+
 test('idle page has responsive Japanese controls and no sorting interaction shell', async () => {
   const html = await readFile(new URL('../index.html', import.meta.url), 'utf8');
   const css = await readFile(new URL('../styles.css', import.meta.url), 'utf8');
@@ -302,5 +374,6 @@ test('prestige preview requires opening and explicitly confirming the dialog', (
   assert.equal(afterPrestige.moonlight, 0);
   assert.equal(afterPrestige.lifetime.memories, 1);
   assert.equal(afterPrestige.lifetime.prestiges, 1);
+  assert.match(documentRef.getElementById('activity-status').textContent, /転生しました/);
   app.destroy();
 });

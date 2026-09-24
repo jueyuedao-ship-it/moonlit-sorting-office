@@ -139,9 +139,15 @@ export function mountIdleGame({
   function persist() {
     const result = saveState(storage, save);
     save = result.value;
-    saveMessage = result.error === 'save-unavailable'
-      ? 'この端末では保存できません'
-      : '端末内に自動保存';
+    if (result.error === 'invalid-save') {
+      saveMessage = '保存データに問題があり、保存できません';
+    } else if (result.error === 'save-unavailable') {
+      saveMessage = 'この端末では保存できません';
+    } else if (result.error === null) {
+      saveMessage = '端末内に自動保存';
+    } else {
+      saveMessage = '保存に失敗しました';
+    }
     lastPersistAt = now();
   }
 
@@ -242,7 +248,7 @@ export function mountIdleGame({
   if (settleAt(startupTime, { summarize: startedWithSavedGame })) persist();
 
   function onCollect() {
-    performAction(click, '月光を集めました。');
+    performAction(click);
   }
 
   function requestPrestige() {

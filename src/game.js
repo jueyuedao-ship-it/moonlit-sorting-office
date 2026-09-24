@@ -234,11 +234,13 @@ export function buyGenerator(state, id) {
   const generator = GENERATOR_CATALOG[id];
   const cost = getGeneratorCost(state, id);
   if (cost === null || state[generator.currency] < cost) return state;
+  const nextCount = state.generators[id] + 1;
+  if (!Number.isSafeInteger(nextCount)) return state;
 
   return {
     ...state,
     [generator.currency]: state[generator.currency] - cost,
-    generators: { ...state.generators, [id]: state.generators[id] + 1 }
+    generators: { ...state.generators, [id]: nextCount }
   };
 }
 
