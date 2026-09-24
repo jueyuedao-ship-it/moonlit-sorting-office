@@ -1,5 +1,5 @@
-const CACHE_NAME = 'moonlit-sorting-office-v2';
-const CACHE_PREFIX = 'moonlit-sorting-office-';
+const CACHE_NAME = 'moonlight-idle-v3';
+const CACHE_PREFIXES = ['moonlit-sorting-office-', 'moonlight-idle-'];
 const APP_SHELL = [
   './', './index.html', './styles.css', './src/app.js', './src/game.js',
   './src/storage.js', './src/presenter.js', './src/header-status.js', './src/pwa.js',
@@ -20,7 +20,7 @@ self.addEventListener('activate', (event) => {
     caches.keys()
       .then((names) => Promise.all(
         names
-          .filter((name) => name.startsWith(CACHE_PREFIX) && name !== CACHE_NAME)
+          .filter((name) => CACHE_PREFIXES.some((prefix) => name.startsWith(prefix)) && name !== CACHE_NAME)
           .map((name) => caches.delete(name))
       ))
       .then(() => self.clients.claim())
