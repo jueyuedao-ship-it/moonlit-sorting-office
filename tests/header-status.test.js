@@ -2,29 +2,28 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { presentHeaderStatus } from '../src/header-status.js';
 
-test('save failure and PWA update remain separately visible', () => {
+test('save failure and PWA update remain separately visible during a run', () => {
   assert.deepEqual(
     presentHeaderStatus({
       saveMessage: 'この端末では保存できません',
       pwaMessage: '更新版を利用できます。再読み込みしてください',
-      gameStatus: 'playing'
+      gameStatus: 'gathering'
     }),
     {
       saveStatus: 'この端末では保存できません',
       pwaStatus: '更新版を利用できます。再読み込みしてください',
-      shiftStatus: '勤務中'
+      gameStatusLabel: '月光を集めています'
     }
   );
 });
 
-test('header shift status maps every game state to explicit Japanese labels', () => {
-  const labels = {
-    ready: '勤務前',
-    playing: '勤務中',
-    won: '勤務終了',
-    failed: '勤務終了'
-  };
-  for (const [gameStatus, shiftStatus] of Object.entries(labels)) {
-    assert.equal(presentHeaderStatus({ gameStatus }).shiftStatus, shiftStatus);
-  }
+test('ready-to-prestige status is distinct from normal moonlight gathering', () => {
+  assert.equal(
+    presentHeaderStatus({ gameStatus: 'prestige-ready' }).gameStatusLabel,
+    '転生の準備が整いました'
+  );
+  assert.equal(
+    presentHeaderStatus({ gameStatus: 'unknown' }).gameStatusLabel,
+    '月光を集めています'
+  );
 });

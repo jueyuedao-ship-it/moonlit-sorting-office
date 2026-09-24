@@ -1,18 +1,16 @@
-const SHIFT_STATUS_LABELS = Object.freeze({
-  ready: '勤務前',
-  playing: '勤務中',
-  won: '勤務終了',
-  failed: '勤務終了'
+const GAME_STATUS_LABELS = Object.freeze({
+  gathering: '月光を集めています',
+  'prestige-ready': '転生の準備が整いました'
 });
 
 export function presentHeaderStatus({
   saveMessage = '端末内に自動保存',
   pwaMessage = '',
-  gameStatus = 'ready'
+  gameStatus = 'gathering'
 } = {}) {
   return {
     saveStatus: saveMessage,
     pwaStatus: pwaMessage,
-    shiftStatus: SHIFT_STATUS_LABELS[gameStatus] ?? SHIFT_STATUS_LABELS.ready
+    gameStatusLabel: GAME_STATUS_LABELS[gameStatus] ?? GAME_STATUS_LABELS.gathering
   };
 }

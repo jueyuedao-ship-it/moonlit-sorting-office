@@ -1,7 +1,7 @@
 {
-  "name": "月影仕分け局",
-  "short_name": "月影仕分け",
-  "description": "深夜の航路郵便を規則に従って仕分ける作業ゲーム",
+  "name": "月影工房",
+  "short_name": "月影工房",
+  "description": "月光を集め、星屑を育てる小さな放置ゲーム。",
   "lang": "ja",
   "start_url": "./",
   "scope": "./",

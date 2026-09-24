@@ -1,227 +1,349 @@
-import { createGame, getCheckpointDistrict, submitChoice } from './game.js';
-import { loadSave, recordFinishedShift, saveState } from './storage.js';
-import { DESTINATION_LABELS, SEAL_LABELS, WEIGHT_LABELS, toViewModel } from './presenter.js';
+import {
+  GENERATOR_CATALOG,
+  UPGRADE_CATALOG,
+  advance,
+  buyGenerator,
+  buyUpgrade,
+  canPrestige,
+  click,
+  createGame,
+  prestige
+} from './game.js';
+import { loadSave, saveState } from './storage.js';
+import { toViewModel } from './presenter.js';
 import { presentHeaderStatus } from './header-status.js';
 import { registerPwa } from './pwa.js';
 
-const TERMINAL_STATUSES = new Set(['won', 'failed']);
+const PERIODIC_SAVE_MS = 10_000;
+const MOON_GENERATOR_IDS = Object.freeze(['lantern', 'observatory', 'moonring', 'garden']);
+const STAR_GENERATOR_IDS = Object.freeze(['starCondenser']);
 
 function getBrowserStorage() {
   try {
-    return window.localStorage;
+    return globalThis.window?.localStorage ?? null;
   } catch {
     return null;
   }
 }
 
-const storage = getBrowserStorage();
-const loaded = loadSave(storage);
-let save = loaded.value;
-let saveMessage = loaded.error === 'load-unavailable'
-  ? 'この端末では保存できません'
-  : loaded.error === 'invalid-save'
-    ? '保存データを初期化しました'
-    : '端末内に自動保存';
-let pwaMessage = '';
-let sectionNotice = '';
-let focusTicketAfterRender = false;
+function requiredElement(documentRef, id) {
+  const element = documentRef.getElementById(id);
+  if (!element) throw new Error(`Required idle game element is missing: #${id}`);
+  return element;
+}
 
-const elements = {
-  saveStatus: document.querySelector('#save-status'),
-  pwaStatus: document.querySelector('#pwa-status'),
-  shiftStatus: document.querySelector('#shift-status'),
-  introPanel: document.querySelector('#intro-panel'),
-  gamePanel: document.querySelector('#game-panel'),
-  resultPanel: document.querySelector('#result-panel'),
-  statusStrip: document.querySelector('#status-strip'),
-  rulebook: document.querySelector('#rulebook'),
-  ticketCard: document.querySelector('#ticket-card'),
-  sortingControls: document.querySelector('#sorting-controls'),
-  feedback: document.querySelector('#feedback')
-};
+function createTextElement(documentRef, tagName, className, text) {
+  const element = documentRef.createElement(tagName);
+  if (className) element.className = className;
+  element.textContent = text;
+  return element;
+}
 
-function persist(nextSave) {
-  const result = saveState(storage, nextSave);
-  save = result.value;
-  if (result.error === 'save-unavailable' || loaded.error === 'load-unavailable') {
-    saveMessage = 'この端末では保存できません';
-  } else if (!result.error) {
-    saveMessage = '端末内に自動保存';
+function makeGainMessage(moonlight, stars) {
+  if (moonlight <= 0 && stars <= 0) return '';
+  const summaryState = {
+    ...createGame(0),
+    moonlight,
+    stars,
+    runMoonEarned: moonlight,
+    runStarsEarned: stars
+  };
+  const summary = toViewModel(summaryState);
+  const gains = [];
+  if (moonlight > 0) gains.push(`月光を${summary.resources.moonlight.text}`);
+  if (stars > 0) gains.push(`星屑を${summary.resources.stars.text}`);
+  return `放置中に${gains.join('、')}獲得しました。`;
+}
+
+function gainsBetween(previous, next) {
+  return {
+    moonlight: Math.max(0, next.moonlight - previous.moonlight),
+    stars: Math.max(0, next.stars - previous.stars)
+  };
+}
+
+function createPurchaseCard(documentRef, { id, name, description }, action, onPurchase) {
+  const card = documentRef.createElement('article');
+  card.className = 'purchase-card';
+  card.dataset.cardId = id;
+
+  const heading = createTextElement(documentRef, 'h3', 'purchase-card__title', name);
+  const detail = createTextElement(documentRef, 'p', 'purchase-card__description', description);
+  const owned = createTextElement(documentRef, 'p', 'purchase-card__owned', '');
+  const production = createTextElement(documentRef, 'p', 'purchase-card__production', '');
+  const cost = createTextElement(documentRef, 'p', 'purchase-card__cost', '');
+  const button = documentRef.createElement('button');
+  button.type = 'button';
+  button.className = 'purchase-card__button';
+  button.dataset.action = action;
+  button.dataset.id = id;
+  button.textContent = `${name}を購入`;
+  button.setAttribute('aria-label', `${name}を購入`);
+  button.addEventListener('click', onPurchase);
+
+  card.append(heading, detail, owned, production, cost, button);
+
+  return {
+    card,
+    update(item) {
+      card.hidden = !item.visible;
+      owned.textContent = item.owned === undefined
+        ? (item.purchased ? '購入済み' : '未購入')
+        : `所持 ${item.owned.toLocaleString('ja-JP')}台`;
+      production.textContent = item.productionText ?? '';
+      cost.textContent = item.costText ? `価格 ${item.costText}` : '';
+      button.disabled = item.buyDisabled;
+      button.textContent = item.purchased
+        ? `${item.name}・購入済み`
+        : `${item.name}を購入 (${item.costText})`;
+      button.setAttribute('aria-label', item.purchased
+        ? `${item.name}、購入済み`
+        : `${item.name}を購入、価格 ${item.costText}`);
+    }
+  };
+}
+
+export function mountIdleGame({
+  documentRef = globalThis.document,
+  storage = getBrowserStorage(),
+  now = () => Date.now(),
+  setIntervalFn = (callback, milliseconds) => globalThis.setInterval(callback, milliseconds),
+  clearIntervalFn = (timer) => globalThis.clearInterval(timer),
+  registerPwaFn = registerPwa
+} = {}) {
+  if (!documentRef) throw new Error('A document is required to mount the idle game');
+
+  const elements = Object.fromEntries([
+    'game-status', 'save-status', 'pwa-status', 'activity-status',
+    'moonlight-value', 'moonlight-rate', 'click-rate', 'run-moonlight',
+    'collect-button', 'generator-list', 'upgrade-list', 'stars-section',
+    'stars-value', 'stars-rate', 'star-generator-list', 'memory-count',
+    'permanent-multiplier', 'prestige-section', 'prestige-requirements',
+    'prestige-gain', 'prestige-loss', 'prestige-button', 'prestige-dialog',
+    'dialog-gain', 'dialog-loss', 'cancel-prestige', 'confirm-prestige'
+  ].map((id) => [id.replaceAll('-', ''), requiredElement(documentRef, id)]));
+
+  const loaded = loadSave(storage);
+  let save = loaded.value;
+  let saveMessage = loaded.error === 'load-unavailable'
+    ? 'この端末では保存できません'
+    : loaded.error === 'invalid-save'
+      ? '保存データを初期化しました'
+      : '端末内に自動保存';
+  let pwaMessage = '';
+  let activityMessage = '';
+  let lastPersistAt = now();
+  let wasHidden = Boolean(documentRef.hidden);
+  let starsWereVisible = toViewModel(save.game).starsVisible;
+
+  function persist() {
+    const result = saveState(storage, save);
+    save = result.value;
+    if (result.error === 'invalid-save') {
+      saveMessage = '保存データに問題があり、保存できません';
+    } else if (result.error === 'save-unavailable') {
+      saveMessage = 'この端末では保存できません';
+    } else if (result.error === null) {
+      saveMessage = '端末内に自動保存';
+    } else {
+      saveMessage = '保存に失敗しました';
+    }
+    lastPersistAt = now();
   }
-}
 
-function renderIntro(view) {
-  elements.introPanel.innerHTML = `
-    <p class="eyebrow">勤務前案内</p>
-    <h2 id="intro-title">航路郵便を仕分ける</h2>
-    <p>票の印章・地区・重量を規則帳で確認し、3つの行き先へ送ってください。18通を処理するか、3回誤配すると勤務終了です。</p>
-    <div class="intro-stats" aria-label="勤務統計">
-      <span>最高得点 ${save.stats.bestScore}</span><span>累計勤務 ${save.stats.shiftsCompleted}回</span>
-    </div>
-    <button id="start-button" class="primary-button" type="button">勤務を開始</button>
-  `;
-  const startButton = elements.introPanel.querySelector('#start-button');
-  startButton.addEventListener('click', startShift);
-}
+  function settleAt(timestamp, { summarize = false } = {}) {
+    const previous = save.game;
+    const next = advance(previous, timestamp);
+    if (next === previous) return false;
+    save = { ...save, game: next };
+    if (summarize) {
+      const gains = gainsBetween(previous, next);
+      activityMessage = makeGainMessage(gains.moonlight, gains.stars);
+    }
+    return true;
+  }
 
-function renderHeader(view) {
-  const status = presentHeaderStatus({
-    saveMessage,
-    pwaMessage,
-    gameStatus: view.mode
+  function render() {
+    const view = toViewModel(save.game);
+    if (view.starsVisible && !starsWereVisible) {
+      const unlockMessage = '星屑と星屑凝縮器が解放されました。';
+      activityMessage = activityMessage ? `${activityMessage} ${unlockMessage}` : unlockMessage;
+    }
+    starsWereVisible = view.starsVisible;
+    const status = presentHeaderStatus({
+      saveMessage,
+      pwaMessage,
+      gameStatus: view.prestige.ready ? 'prestige-ready' : 'gathering'
+    });
+
+    elements.gamestatus.textContent = status.gameStatusLabel;
+    elements.savestatus.textContent = status.saveStatus;
+    elements.pwastatus.textContent = status.pwaStatus;
+    elements.activitystatus.textContent = activityMessage;
+    elements.moonlightvalue.textContent = view.resources.moonlight.text;
+    elements.moonlightrate.textContent = view.production.moonlightPerSecondText;
+    elements.clickrate.textContent = view.production.clickAmountText;
+    elements.runmoonlight.textContent = view.resources.runMoonEarned.text;
+    elements.starssection.hidden = !view.starsVisible;
+    elements.starsvalue.textContent = view.resources.stars.text;
+    elements.starsrate.textContent = view.production.starsPerSecondText;
+    elements.memorycount.textContent = save.game.lifetime.memories.toLocaleString('ja-JP');
+    elements.permanentmultiplier.textContent = view.production.permanentMultiplierText;
+
+    for (const id of MOON_GENERATOR_IDS) generatorCards[id].update(view.generators[id]);
+    for (const id of STAR_GENERATOR_IDS) starGeneratorCards[id].update(view.generators[id]);
+    for (const id of Object.keys(UPGRADE_CATALOG)) upgradeCards[id].update(view.upgrades[id]);
+
+    elements.prestigesection.hidden = !view.prestige.visible;
+    elements.prestigerequirements.textContent = `${view.prestige.requirements.moonlightText} ・ ${view.prestige.requirements.starsText}`;
+    elements.prestigegain.textContent = view.prestige.gainText;
+    elements.prestigeloss.textContent = view.prestige.lossText;
+    elements.prestigebutton.disabled = !view.prestige.ready;
+    elements.dialoggain.textContent = view.prestige.gainText;
+    elements.dialogloss.textContent = view.prestige.lossText;
+    elements.collectbutton.setAttribute('aria-label', `月光を集める。${view.production.clickAmountText}`);
+  }
+
+  function performAction(transition, message = '') {
+    const previous = save.game;
+    const settled = advance(previous, now());
+    const next = transition(settled);
+    if (next === previous && settled === previous) return false;
+    save = { ...save, game: next };
+    if (message && next !== settled) activityMessage = message;
+    else if (next !== settled) activityMessage = '';
+    persist();
+    render();
+    return true;
+  }
+
+  const generatorCards = Object.fromEntries(MOON_GENERATOR_IDS.map((id) => {
+    const generator = GENERATOR_CATALOG[id];
+    const card = createPurchaseCard(documentRef, generator, 'buy-generator', () => {
+      performAction((game) => buyGenerator(game, id), `${generator.name}を購入しました。`);
+    });
+    elements.generatorlist.append(card.card);
+    return [id, card];
+  }));
+
+  const starGeneratorCards = Object.fromEntries(STAR_GENERATOR_IDS.map((id) => {
+    const generator = GENERATOR_CATALOG[id];
+    const card = createPurchaseCard(documentRef, generator, 'buy-generator', () => {
+      performAction((game) => buyGenerator(game, id), `${generator.name}を購入しました。`);
+    });
+    elements.stargeneratorlist.append(card.card);
+    return [id, card];
+  }));
+
+  const upgradeCards = Object.fromEntries(Object.entries(UPGRADE_CATALOG).map(([id, upgrade]) => {
+    const card = createPurchaseCard(documentRef, upgrade, 'buy-upgrade', () => {
+      performAction((game) => buyUpgrade(game, id), `${upgrade.name}を購入しました。`);
+    });
+    elements.upgradelist.append(card.card);
+    return [id, card];
+  }));
+
+  const startupTime = now();
+  const startedWithSavedGame = loaded.error === null;
+  if (settleAt(startupTime, { summarize: startedWithSavedGame })) persist();
+
+  function onCollect() {
+    performAction(click);
+  }
+
+  function requestPrestige() {
+    const changed = settleAt(now());
+    if (changed) persist();
+    render();
+    if (!canPrestige(save.game)) {
+      return;
+    }
+    const dialog = elements.prestigedialog;
+    if (typeof dialog.showModal === 'function') dialog.showModal();
+    else dialog.open = true;
+  }
+
+  function closePrestigeDialog() {
+    const dialog = elements.prestigedialog;
+    if (typeof dialog.close === 'function') dialog.close();
+    else dialog.open = false;
+  }
+
+  function confirmPrestige() {
+    const previous = save.game;
+    const settled = advance(previous, now());
+    const next = prestige(settled);
+    if (next === settled) {
+      if (settled !== previous) {
+        save = { ...save, game: settled };
+        persist();
+      }
+      closePrestigeDialog();
+      render();
+      return;
+    }
+    save = { ...save, game: next };
+    activityMessage = `転生しました。記憶${next.lifetime.memories.toLocaleString('ja-JP')}個の力で、次の周回を始めます。`;
+    persist();
+    closePrestigeDialog();
+    render();
+  }
+
+  function onVisibilityChange() {
+    if (documentRef.hidden) {
+      wasHidden = true;
+      settleAt(now());
+      persist();
+      return;
+    }
+    if (wasHidden) {
+      wasHidden = false;
+      settleAt(now(), { summarize: true });
+      persist();
+      render();
+    }
+  }
+
+  function onPageHide() {
+    settleAt(now());
+    persist();
+  }
+
+  function onTick() {
+    if (documentRef.hidden) return;
+    const timestamp = now();
+    settleAt(timestamp);
+    if (timestamp - lastPersistAt >= PERIODIC_SAVE_MS) persist();
+    render();
+  }
+
+  elements.collectbutton.addEventListener('click', onCollect);
+  elements.prestigebutton.addEventListener('click', requestPrestige);
+  elements.cancelprestige.addEventListener('click', closePrestigeDialog);
+  elements.confirmprestige.addEventListener('click', confirmPrestige);
+  documentRef.addEventListener('visibilitychange', onVisibilityChange);
+
+  const lifecycleTarget = documentRef.defaultView ?? globalThis.window;
+  lifecycleTarget?.addEventListener?.('pagehide', onPageHide);
+
+  render();
+  const timer = setIntervalFn(onTick, 1_000);
+  registerPwaFn((message) => {
+    pwaMessage = message;
+    render();
   });
-  elements.saveStatus.textContent = status.saveStatus;
-  elements.pwaStatus.textContent = status.pwaStatus;
-  elements.shiftStatus.textContent = status.shiftStatus;
+
+  return {
+    getState: () => save.game,
+    render,
+    destroy() {
+      clearIntervalFn(timer);
+      documentRef.removeEventListener?.('visibilitychange', onVisibilityChange);
+      lifecycleTarget?.removeEventListener?.('pagehide', onPageHide);
+    }
+  };
 }
 
-function renderStatus(view) {
-  const notice = sectionNotice ? `<p class="section-notice">${sectionNotice}</p>` : '';
-  elements.statusStrip.innerHTML = `
-    <span>${view.scoreText}</span>
-    <span>${view.progressText}</span>
-    <span>${view.mistakesText}</span>
-    <span>${view.streakText}</span>
-    ${notice}
-  `;
+if (typeof globalThis.document !== 'undefined' && globalThis.document.getElementById('collect-button')) {
+  mountIdleGame({ documentRef: globalThis.document });
 }
-
-function renderRules(view) {
-  elements.rulebook.innerHTML = `
-    <p class="eyebrow">規則帳</p>
-    <h2 id="rules-title">優先順位</h2>
-    <ol>
-      <li><strong>赤印</strong>なら特急便</li>
-      <li><strong>${view.checkpointDistrict}</strong>または重量なら確認台</li>
-      <li>それ以外は通常便</li>
-    </ol>
-    <p class="rule-note">現在の要確認地区: <strong>${view.checkpointDistrict}</strong></p>
-  `;
-}
-
-function renderTicket(view) {
-  const ticket = view.ticket;
-  if (!ticket) {
-    elements.ticketCard.innerHTML = '<h2 id="ticket-title">勤務終了</h2>';
-    return;
-  }
-  elements.ticketCard.innerHTML = `
-    <p class="eyebrow">航路郵便票</p>
-    <h2 id="ticket-title">${view.ticket.id}</h2>
-    <dl class="ticket-facts">
-      <div><dt>印章</dt><dd>${SEAL_LABELS[ticket.seal] ?? ticket.seal}</dd></div>
-      <div><dt>地区</dt><dd>${ticket.district}</dd></div>
-      <div><dt>重量</dt><dd>${WEIGHT_LABELS[ticket.weight] ?? ticket.weight}</dd></div>
-    </dl>
-  `;
-}
-
-function renderControls(view) {
-  for (const button of elements.sortingControls.querySelectorAll('button[data-destination]')) {
-    button.disabled = view.controlsDisabled;
-    const destination = button.dataset.destination;
-    button.setAttribute('aria-label', `${DESTINATION_LABELS[destination]}へ仕分け`);
-  }
-}
-
-function renderGame(view) {
-  renderStatus(view);
-  renderRules(view);
-  renderTicket(view);
-  renderControls(view);
-  elements.feedback.textContent = view.feedbackText;
-  if (view.feedbackTone) {
-    elements.feedback.dataset.tone = view.feedbackTone;
-  } else {
-    delete elements.feedback.dataset.tone;
-  }
-}
-
-function renderResult(view) {
-  elements.resultPanel.innerHTML = `
-    <p class="eyebrow">勤務結果</p>
-    <h2 id="result-title">${view.resultText}</h2>
-    <p class="result-score">${view.scoreText}</p>
-    <p>正解 ${save.activeGame?.correct ?? 0}通 / 誤配 ${save.activeGame?.mistakes ?? 0}回 / 最大連続正解 ${save.activeGame?.bestStreak ?? 0}通</p>
-    <p>最高得点 ${save.stats.bestScore} ・ 累計勤務 ${save.stats.shiftsCompleted}回</p>
-    <button id="restart-button" class="primary-button" type="button">もう一度勤務</button>
-  `;
-  elements.resultPanel.querySelector('#restart-button').addEventListener('click', startShift);
-}
-
-function render() {
-  const game = save.activeGame;
-  const view = toViewModel(game, save.stats);
-  renderHeader(view);
-  const showingGame = game?.status === 'playing';
-  const showingResult = TERMINAL_STATUSES.has(game?.status);
-  elements.introPanel.hidden = showingGame || showingResult;
-  elements.gamePanel.hidden = !showingGame;
-  elements.resultPanel.hidden = !showingResult;
-
-  if (!showingGame && !showingResult) {
-    renderIntro(view);
-  } else if (showingGame) {
-    renderGame(view);
-  } else if (showingResult) {
-    renderResult(view);
-  }
-
-  if (focusTicketAfterRender && !elements.gamePanel.hidden) {
-    elements.ticketCard.focus();
-    focusTicketAfterRender = false;
-  }
-}
-
-function startShift() {
-  const freshGame = { ...createGame(Date.now() >>> 0), status: 'playing' };
-  sectionNotice = '';
-  focusTicketAfterRender = true;
-  persist({ ...save, activeGame: freshGame });
-  render();
-}
-
-function chooseDestination(destination) {
-  const game = save.activeGame;
-  if (!game || game.status !== 'playing') return;
-
-  const oldCheckpoint = getCheckpointDistrict(game.cursor);
-  const nextGame = submitChoice(game, destination);
-  if (nextGame === game) return;
-
-  const nextCheckpoint = getCheckpointDistrict(nextGame.cursor);
-  sectionNotice = oldCheckpoint !== nextCheckpoint
-    ? `区間変更。要確認地区は${nextCheckpoint}です。`
-    : '';
-  focusTicketAfterRender = nextGame.status === 'playing' && oldCheckpoint !== nextCheckpoint;
-
-  let nextSave = { ...save, activeGame: nextGame };
-  if (!TERMINAL_STATUSES.has(game.status) && TERMINAL_STATUSES.has(nextGame.status)) {
-    nextSave = recordFinishedShift(save, nextGame);
-  }
-  persist(nextSave);
-  render();
-}
-
-for (const button of document.querySelectorAll('#sorting-controls button[data-destination]')) {
-  button.addEventListener('click', () => chooseDestination(button.dataset.destination));
-}
-
-document.addEventListener('keydown', (event) => {
-  if (event.defaultPrevented || event.repeat || event.ctrlKey || event.metaKey || event.altKey) return;
-  const target = event.target;
-  if (target instanceof HTMLElement && (
-    ['INPUT', 'TEXTAREA', 'SELECT', 'BUTTON'].includes(target.tagName)
-    || target.isContentEditable
-  )) return;
-  const destination = { '1': 'express', '2': 'review', '3': 'regular' }[event.key];
-  if (!destination || !save.activeGame || save.activeGame.status !== 'playing') return;
-  event.preventDefault();
-  chooseDestination(destination);
-});
-
-render();
-registerPwa((message) => {
-  pwaMessage = message;
-  render();
-});

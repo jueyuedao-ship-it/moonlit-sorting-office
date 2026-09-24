@@ -31,9 +31,9 @@ async function loadWorker(overrides = {}) {
 
 test('manifest is standalone and every launch/icon URL is scope relative', async () => {
   const manifest = JSON.parse(await readFile(new URL('../manifest.webmanifest', import.meta.url), 'utf8'));
-  assert.equal(manifest.name, '月影仕分け局');
-  assert.equal(manifest.short_name, '月影仕分け');
-  assert.equal(manifest.description, '深夜の航路郵便を規則に従って仕分ける作業ゲーム');
+  assert.equal(manifest.name, '月影工房');
+  assert.equal(manifest.short_name, '月影工房');
+  assert.equal(manifest.description, '月光を集め、星屑を育てる小さな放置ゲーム。');
   assert.equal(manifest.lang, 'ja');
   assert.equal(manifest.start_url, './');
   assert.equal(manifest.scope, './');
@@ -56,8 +56,16 @@ test('install precaches the complete relative app shell', async () => {
   let pending;
   listeners.get('install')({ waitUntil: (promise) => { pending = promise; } });
   await pending;
-  assert.equal(openedName, 'moonlit-sorting-office-v2');
+  assert.equal(openedName, 'moonlight-idle-v3');
   assert.deepEqual(added, expectedShell);
+  for (const path of added) {
+    assert.equal(path.startsWith('./'), true, `${path} should be relative to the app scope`);
+    assert.equal(
+      new URL(path, 'https://example.test/moonlit-sorting-office/').pathname.startsWith('/moonlit-sorting-office/'),
+      true,
+      `${path} should resolve within the GitHub Pages subpath`
+    );
+  }
   assert.equal(skipped, true);
 });
 
@@ -65,7 +73,11 @@ test('activate removes only obsolete caches owned by this app', async () => {
   const deleted = [];
   let claimed = false;
   const caches = {
-    keys: async () => ['moonlit-sorting-office-v0', 'moonlit-sorting-office-v1', 'another-app-v1'],
+    keys: async () => [
+      'moonlit-sorting-office-v0', 'moonlit-sorting-office-v1',
+      'moonlight-idle-v1', 'moonlight-idle-v2', 'moonlight-idle-v3',
+      'another-app-v1'
+    ],
     delete: async (name) => { deleted.push(name); return true; }
   };
   const { listeners, context } = await loadWorker({ caches, fetch: async () => null });
@@ -73,7 +85,10 @@ test('activate removes only obsolete caches owned by this app', async () => {
   let pending;
   listeners.get('activate')({ waitUntil: (promise) => { pending = promise; } });
   await pending;
-  assert.deepEqual(deleted, ['moonlit-sorting-office-v0', 'moonlit-sorting-office-v1']);
+  assert.deepEqual(deleted, [
+    'moonlit-sorting-office-v0', 'moonlit-sorting-office-v1',
+    'moonlight-idle-v1', 'moonlight-idle-v2'
+  ]);
   assert.equal(claimed, true);
 });
 
@@ -112,10 +127,27 @@ test('network-first returns a valid response when cache update fails', async () 
   assert.equal(await returned, response);
 });
 
+test('network-first returns a valid response when opening the cache fails', async () => {
+  const response = { ok: true, clone: () => 'cached-copy' };
+  let matchCalls = 0;
+  const caches = {
+    open: async () => { throw new Error('cache storage unavailable'); },
+    match: async () => { matchCalls += 1; return undefined; }
+  };
+  const { listeners } = await loadWorker({ caches, fetch: async () => response });
+  let returned;
+  listeners.get('fetch')({
+    request: { method: 'GET', url: 'https://example.test/moonlit-sorting-office/styles.css', mode: 'no-cors' },
+    respondWith: (promise) => { returned = promise; }
+  });
+  assert.equal(await returned, response);
+  assert.equal(matchCalls, 0);
+});
+
 test('same-origin navigation falls back to scoped index when network and request cache fail', async () => {
   const matches = [];
   const fallback = { body: 'index shell' };
-  const request = { method: 'GET', url: 'https://example.test/moonlit-sorting-office/unknown', mode: 'navigate' };
+  const request = { method: 'GET', url: 'https://example.test/moonlit-sorting-office/story/chapter', mode: 'navigate' };
   const caches = {
     match: async (key) => {
       matches.push(key);
