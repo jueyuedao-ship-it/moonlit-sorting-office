@@ -1,9 +1,23 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512">
-  <rect width="512" height="512" rx="112" fill="#081525"/>
-  <circle cx="354" cy="158" r="92" fill="#e8b95c"/>
-  <circle cx="389" cy="128" r="92" fill="#081525"/>
-  <path d="M92 224h328v194H92z" fill="#f3e4c2"/>
-  <path d="M92 224l164 132 164-132" fill="#d4bd91"/>
-  <path d="M92 418l122-116M420 418L298 302" fill="none" stroke="#b29159" stroke-width="14" stroke-linecap="round"/>
-  <path d="M92 224l164 132 164-132" fill="none" stroke="#785f37" stroke-width="14" stroke-linejoin="round"/>
+  <defs>
+    <radialGradient id="moonlight" cx="50%" cy="40%" r="70%">
+      <stop offset="0" stop-color="#fff1bf"/>
+      <stop offset="1" stop-color="#e4b957"/>
+    </radialGradient>
+    <linearGradient id="crystal" x1="0" x2="1" y1="0" y2="1">
+      <stop offset="0" stop-color="#e6dcff"/>
+      <stop offset="1" stop-color="#9a84d2"/>
+    </linearGradient>
+  </defs>
+  <rect width="512" height="512" rx="112" fill="#111b32"/>
+  <circle cx="346" cy="154" r="102" fill="url(#moonlight)"/>
+  <circle cx="388" cy="112" r="98" fill="#111b32"/>
+  <path d="M130 134l11 27 27 11-27 11-11 27-11-27-27-11 27-11z" fill="#f6d987"/>
+  <path d="M393 249l7 17 17 7-17 7-7 17-7-17-17-7 17-7z" fill="#bca9e8"/>
+  <circle cx="204" cy="252" r="5" fill="#f6f0df"/>
+  <circle cx="330" cy="304" r="4" fill="#f6f0df"/>
+  <path d="M103 378q153 91 306 0" fill="none" stroke="#d4a74d" stroke-linecap="round" stroke-width="16"/>
+  <path d="M202 356l54-53 54 53v62H202z" fill="url(#crystal)" stroke="#f6f0df" stroke-linejoin="round" stroke-width="10"/>
+  <path d="M256 304v111M208 358h96" fill="none" stroke="#7660a7" stroke-linecap="round" stroke-width="7"/>
+  <path d="M120 412q136 43 272 0" fill="none" stroke="#7d91b0" stroke-linecap="round" stroke-width="10"/>
 </svg>

@@ -2,45 +2,127 @@
 <html lang="ja">
   <head>
     <meta charset="utf-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1">
-    <meta name="theme-color" content="#10263f">
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+    <meta name="theme-color" content="#111b32">
     <meta name="apple-mobile-web-app-capable" content="yes">
-    <meta name="apple-mobile-web-app-title" content="月影仕分け局">
+    <meta name="apple-mobile-web-app-title" content="月影工房">
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-    <title>月影仕分け局</title>
+    <meta name="description" content="月光を集め、星屑を育てる小さな放置ゲーム。">
+    <title>月影工房 | 月光をあつめる放置ゲーム</title>
     <link rel="manifest" href="./manifest.webmanifest">
     <link rel="apple-touch-icon" sizes="180x180" href="./assets/icon-180.png">
     <link rel="stylesheet" href="./styles.css">
   </head>
   <body>
     <header class="masthead">
-      <div>
-        <p class="eyebrow">午前零時の航路郵便</p>
-        <h1>月影仕分け局</h1>
+      <div class="brand">
+        <p class="eyebrow">月あかりを集める小さな工房</p>
+        <h1>月影工房</h1>
       </div>
-      <div class="header-status" aria-label="勤務と保存の状態">
-        <p id="shift-status">勤務前</p>
+      <div class="header-status" aria-label="ゲームと保存の状態">
+        <p id="game-status">月光を集めています</p>
         <p id="save-status" role="status" aria-live="polite">端末内に自動保存</p>
         <p id="pwa-status" role="status" aria-live="polite"></p>
       </div>
     </header>
-    <main>
-      <section id="intro-panel" aria-labelledby="intro-title"></section>
-      <section id="game-panel" hidden aria-labelledby="ticket-title">
-        <div id="status-strip" aria-label="勤務状況" aria-live="polite"></div>
-        <div class="game-grid">
-          <aside id="rulebook" aria-labelledby="rules-title"></aside>
-          <article id="ticket-card" aria-labelledby="ticket-title" tabindex="-1"></article>
+
+    <main id="game-app">
+      <p id="activity-status" class="activity-status" role="status" aria-live="polite"></p>
+
+      <section class="hero" aria-labelledby="hero-title">
+        <div class="hero-copy">
+          <p class="eyebrow">今夜のひとしごと</p>
+          <h2 id="hero-title">月光を集めよう</h2>
+          <p>ボタンを押して月光を集め、工房の道具にまかせて夜空を満たしていきます。</p>
+          <button id="collect-button" class="collect-button" type="button">
+            <span class="collect-button__moon" aria-hidden="true">☾</span>
+            <span>月光を集める</span>
+          </button>
+          <p id="click-rate" class="click-rate" aria-live="off">+1 月光/クリック</p>
         </div>
-        <div id="sorting-controls" aria-label="仕分け先">
-          <button type="button" data-destination="express"><kbd>1</kbd> 特急便</button>
-          <button type="button" data-destination="review"><kbd>2</kbd> 確認台</button>
-          <button type="button" data-destination="regular"><kbd>3</kbd> 通常便</button>
+
+        <div class="resource-board" aria-label="現在の資源">
+          <article class="resource-card resource-card--moonlight" aria-labelledby="moonlight-heading">
+            <p id="moonlight-heading" class="resource-label"><span aria-hidden="true">☾</span> 月光</p>
+            <p id="moonlight-value" class="resource-value" aria-live="off">0</p>
+            <p id="moonlight-rate" class="resource-rate" aria-live="off">0 月光/秒</p>
+          </article>
+          <article id="stars-section" class="resource-card resource-card--stars" aria-labelledby="stars-heading" hidden>
+            <p id="stars-heading" class="resource-label"><span aria-hidden="true">✦</span> 星屑</p>
+            <p id="stars-value" class="resource-value" aria-live="off">0</p>
+            <p id="stars-rate" class="resource-rate" aria-live="off">0 星屑/秒</p>
+            <p class="resource-note">月光を5,000集めると星屑が目覚めます。</p>
+            <div id="star-generator-list" class="card-grid card-grid--single"></div>
+          </article>
         </div>
-        <p id="feedback" aria-live="polite"></p>
       </section>
-      <section id="result-panel" hidden aria-labelledby="result-title" aria-live="polite"></section>
+
+      <section class="progress-strip" aria-label="周回と恒久成長">
+        <article class="progress-item">
+          <p>この周回で集めた月光</p>
+          <strong id="run-moonlight" aria-live="off">0</strong>
+        </article>
+        <article class="progress-item">
+          <p>積み重ねた記憶</p>
+          <strong id="memory-count">0</strong>
+        </article>
+        <article class="progress-item">
+          <p>恒久の生産倍率</p>
+          <strong id="permanent-multiplier">1倍</strong>
+        </article>
+      </section>
+
+      <section class="game-section" aria-labelledby="generators-title">
+        <div class="section-heading">
+          <div>
+            <p class="eyebrow">自動で集める</p>
+            <h2 id="generators-title">月光の設備</h2>
+          </div>
+          <p>設備を買うと、画面を閉じている間も月光を集めます。</p>
+        </div>
+        <div id="generator-list" class="card-grid"></div>
+      </section>
+
+      <section class="game-section" aria-labelledby="upgrades-title">
+        <div class="section-heading">
+          <div>
+            <p class="eyebrow">工房のひらめき</p>
+            <h2 id="upgrades-title">月光の強化</h2>
+          </div>
+          <p>使い切りの強化で、クリックや設備の力を伸ばします。</p>
+        </div>
+        <div id="upgrade-list" class="card-grid"></div>
+      </section>
+
+      <section id="prestige-section" class="prestige-section" aria-labelledby="prestige-title" hidden>
+        <div class="section-heading">
+          <div>
+            <p class="eyebrow">次の夜へ</p>
+            <h2 id="prestige-title">転生の準備</h2>
+          </div>
+          <p id="prestige-requirements">100,000 月光 ・ 25 星屑</p>
+        </div>
+        <p id="prestige-gain" class="prestige-gain"></p>
+        <p id="prestige-loss" class="prestige-loss"></p>
+        <button id="prestige-button" class="secondary-button" type="button" disabled>転生の内容を確認</button>
+      </section>
+
+      <footer class="page-footer">
+        <p>進行状況はこの端末に保存されます。最大8時間分の放置収益を受け取れます。</p>
+      </footer>
     </main>
+
+    <dialog id="prestige-dialog" class="prestige-dialog" aria-labelledby="dialog-title">
+      <p class="eyebrow">最後の確認</p>
+      <h2 id="dialog-title">次の夜へ進みますか？</h2>
+      <p id="dialog-gain" class="prestige-gain"></p>
+      <p id="dialog-loss" class="prestige-loss"></p>
+      <div class="dialog-actions">
+        <button id="cancel-prestige" class="quiet-button" type="button">今回はやめる</button>
+        <button id="confirm-prestige" class="secondary-button" type="button">転生を確定する</button>
+      </div>
+    </dialog>
+
     <script type="module" src="./src/app.js"></script>
   </body>
 </html>
