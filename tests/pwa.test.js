@@ -127,6 +127,23 @@ test('network-first returns a valid response when cache update fails', async () 
   assert.equal(await returned, response);
 });
 
+test('network-first returns a valid response when opening the cache fails', async () => {
+  const response = { ok: true, clone: () => 'cached-copy' };
+  let matchCalls = 0;
+  const caches = {
+    open: async () => { throw new Error('cache storage unavailable'); },
+    match: async () => { matchCalls += 1; return undefined; }
+  };
+  const { listeners } = await loadWorker({ caches, fetch: async () => response });
+  let returned;
+  listeners.get('fetch')({
+    request: { method: 'GET', url: 'https://example.test/moonlit-sorting-office/styles.css', mode: 'no-cors' },
+    respondWith: (promise) => { returned = promise; }
+  });
+  assert.equal(await returned, response);
+  assert.equal(matchCalls, 0);
+});
+
 test('same-origin navigation falls back to scoped index when network and request cache fail', async () => {
   const matches = [];
   const fallback = { body: 'index shell' };
